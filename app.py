@@ -236,11 +236,15 @@ search_df = load_search_df()
 if not search_df.empty:
     min_date = pd.to_datetime(search_df["dateDepart"].min()).date()
     max_date = pd.to_datetime(search_df["dateReturn"].max()).date()
+    # Defaults: today to today + 7 days, clamped to available data range
+    today = pd.Timestamp.today().normalize().date()
+    default_start = max(min_date, today)
+    default_end = min(max_date, today + pd.Timedelta(days=7).to_pytimedelta())
     col1, col2 = st.columns(2)
     with col1:
-        start_q = st.date_input("Start date", value=min_date, min_value=min_date, max_value=max_date)
+        start_q = st.date_input("Start date", value=default_start, min_value=min_date, max_value=max_date)
     with col2:
-        end_q = st.date_input("End date", value=max_date, min_value=min_date, max_value=max_date)
+        end_q = st.date_input("End date", value=default_end, min_value=min_date, max_value=max_date)
 
     if start_q > end_q:
         st.error("Start date must be before or equal to end date.")
@@ -259,6 +263,5 @@ if not search_df.empty:
         cols_to_show = [c for c in preferred_cols if c in results.columns]
         if not cols_to_show:
             cols_to_show = list(results.columns)
-        st.dataframe(results[cols_to_show].sort_values("dateDepart").head(1000), use_container_width=True)
-        if len(results) > 1000:
-            st.info("Showing first 1,000 rows. Refine your date range to narrow results.")
+        st.dataframe(results[cols_to_show].sort_values("dateDepart"), use_container_width=True)
+        
