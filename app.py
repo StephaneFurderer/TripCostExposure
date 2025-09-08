@@ -100,7 +100,8 @@ if use_dummy_data:
         if "US" in selected_countries:
             country_mask |= (df['Country'] == 'US')
         if "ROW" in selected_countries:
-            country_mask |= (df['Country'] == 'ROW')
+            # ROW includes all countries that are not US and not null
+            country_mask |= ((df['Country'] != 'US') & (df['Country'].notna()))
         if "null" in selected_countries:
             country_mask |= df['Country'].isna()
         
