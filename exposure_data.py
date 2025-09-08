@@ -664,11 +664,11 @@ def aggregate_traveling_unique_by_period(
                             nights_in_week.append(nights)
                         
                         # Aggregate metrics for this group
-                        volume_unique = len(group_df)
-                        maxTripCostExposure_unique = group_df["tripCost"].sum()
-                        tripCostPerNightExposure_period = (group_df["tripCost"] / group_df["nightsCount"] * nights_in_week).sum()
+                        volume = len(group_df)
+                        maxTripCostExposure = group_df["tripCost"].sum()
+                        tripCostPerNightExposure = (group_df["tripCost"] / group_df["nightsCount"] * nights_in_week).sum()
                         
-                        record = [year, x_norm, volume_unique, maxTripCostExposure_unique, tripCostPerNightExposure_period] + list(group_vals)
+                        record = [year, x_norm, volume, maxTripCostExposure, tripCostPerNightExposure] + list(group_vals)
                         records.append(record)
                 else:
                     # No grouping - aggregate all traveling policies
@@ -679,11 +679,11 @@ def aggregate_traveling_unique_by_period(
                         nights = (end_in_week - start_in_week).days + 1
                         nights_in_week.append(nights)
                     
-                    volume_unique = len(traveling_policies)
-                    maxTripCostExposure_unique = traveling_policies["tripCost"].sum()
-                    tripCostPerNightExposure_period = (traveling_policies["tripCost"] / traveling_policies["nightsCount"] * nights_in_week).sum()
+                    volume = len(traveling_policies)
+                    maxTripCostExposure = traveling_policies["tripCost"].sum()
+                    tripCostPerNightExposure = (traveling_policies["tripCost"] / traveling_policies["nightsCount"] * nights_in_week).sum()
                     
-                    record = [year, x_norm, volume_unique, maxTripCostExposure_unique, tripCostPerNightExposure_period]
+                    record = [year, x_norm, volume, maxTripCostExposure, tripCostPerNightExposure]
                     records.append(record)
             
             # Debug message every 10 weeks or at the end
@@ -734,11 +734,11 @@ def aggregate_traveling_unique_by_period(
                             nights_in_month.append(nights)
                         
                         # Aggregate metrics for this group
-                        volume_unique = len(group_df)
-                        maxTripCostExposure_unique = group_df["tripCost"].sum()
-                        tripCostPerNightExposure_period = (group_df["tripCost"] / group_df["nightsCount"] * nights_in_month).sum()
+                        volume = len(group_df)
+                        maxTripCostExposure = group_df["tripCost"].sum()
+                        tripCostPerNightExposure = (group_df["tripCost"] / group_df["nightsCount"] * nights_in_month).sum()
                         
-                        record = [year, x_norm, volume_unique, maxTripCostExposure_unique, tripCostPerNightExposure_period] + list(group_vals)
+                        record = [year, x_norm, volume, maxTripCostExposure, tripCostPerNightExposure] + list(group_vals)
                         records.append(record)
                 else:
                     # No grouping - aggregate all traveling policies
@@ -749,11 +749,11 @@ def aggregate_traveling_unique_by_period(
                         nights = (end_in_month - start_in_month).days + 1
                         nights_in_month.append(nights)
                     
-                    volume_unique = len(traveling_policies)
-                    maxTripCostExposure_unique = traveling_policies["tripCost"].sum()
-                    tripCostPerNightExposure_period = (traveling_policies["tripCost"] / traveling_policies["nightsCount"] * nights_in_month).sum()
+                    volume = len(traveling_policies)
+                    maxTripCostExposure = traveling_policies["tripCost"].sum()
+                    tripCostPerNightExposure = (traveling_policies["tripCost"] / traveling_policies["nightsCount"] * nights_in_month).sum()
                     
-                    record = [year, x_norm, volume_unique, maxTripCostExposure_unique, tripCostPerNightExposure_period]
+                    record = [year, x_norm, volume, maxTripCostExposure, tripCostPerNightExposure]
                     records.append(record)
             
             # Debug message every 5 months or at the end
@@ -764,10 +764,10 @@ def aggregate_traveling_unique_by_period(
             current_month = next_month
 
     if not records:
-        cols = ["year", "x", "volume_unique", "maxTripCostExposure_unique", "tripCostPerNightExposure_period"] + extra_cols
+        cols = ["year", "x", "volume", "maxTripCostExposure", "tripCostPerNightExposure"] + extra_cols
         return pd.DataFrame(columns=cols)
 
-    cols = ["year", "x", "volume_unique", "maxTripCostExposure_unique", "tripCostPerNightExposure_period"] + extra_cols
+    cols = ["year", "x", "volume", "maxTripCostExposure", "tripCostPerNightExposure"] + extra_cols
     df_rec = pd.DataFrame.from_records(records, columns=cols)
 
     sort_cols = ["x", "year"] + extra_cols
