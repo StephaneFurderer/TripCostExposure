@@ -376,7 +376,9 @@ def compute_traveling_daily(
     if extra_cols:
         # Build grid per group for reindexing
         grids = []
-        for keys, grp in deltas.groupby(extra_cols, dropna=False):
+        # Handle single column case to avoid pandas warning
+        groupby_cols = extra_cols[0] if len(extra_cols) == 1 else extra_cols
+        for keys, grp in deltas.groupby(groupby_cols, dropna=False):
             if not isinstance(keys, tuple):
                 keys = (keys,)
             idx = pd.Index(full_days, name="day")
@@ -395,7 +397,9 @@ def compute_traveling_daily(
         # Perform cumulative sums via group-wise transform
         deltas_full = deltas_full.sort_values(sort_cols)
         for col in ["volume", "maxTripCostExposure", "tripCostPerNightExposure"]:
-            deltas_full[col] = deltas_full.groupby(extra_cols, dropna=False)[col].cumsum()
+                # Handle single column case to avoid pandas warning
+                groupby_cols = extra_cols[0] if len(extra_cols) == 1 else extra_cols
+                deltas_full[col] = deltas_full.groupby(groupby_cols, dropna=False)[col].cumsum()
         daily = deltas_full
     else:
         idx = pd.Index(full_days, name="day")
@@ -579,22 +583,41 @@ def aggregate_traveling_unique_by_period(
     # Most efficient approach: iterate through periods and find traveling policies
     records = []
     
+    # Get date range from all policies first
+    all_dates = pd.concat([tmp["dateDepart"], tmp["dateReturn"]]).dropna()
+    min_date = all_dates.min()
+    data_max_date = all_dates.max()
+    
     # Set default max_date to 3 weeks after today if not provided
     if max_date is None:
         max_date = pd.Timestamp.now() + pd.to_timedelta(21, unit="D")
     
-    # Get date range from all policies, but limit to max_date
-    all_dates = pd.concat([tmp["dateDepart"], tmp["dateReturn"]]).dropna()
-    min_date = all_dates.min()
-    # Don't limit max_date here - we want to use the user-provided max_date as the cutoff
+    # If max_date is in the future compared to data, use the data's max date instead
+    if max_date > data_max_date:
+        max_date = data_max_date
+        print(f"Adjusted max_date to data range: {max_date.date()}")
     
-    print(f"Processing {period} aggregation from {min_date.date()} to {max_date.date()}")
+    # Determine scenario for debug output
+    scenario = f"{period}"
+    if additional_group_by:
+        if isinstance(additional_group_by, str):
+            scenario += f" by {additional_group_by}"
+        else:
+            scenario += f" by {', '.join(additional_group_by)}"
+    else:
+        scenario += " (all)"
+    
+    print(f"Processing {scenario} aggregation from {min_date.date()} to {max_date.date()}")
     
     if period == "week":
-        # Generate all ISO weeks in the range, but limit to max_date
-        current_week = min_date - pd.to_timedelta(min_date.weekday(), unit="D")  # Monday of first week
+        # Start from a more recent date to avoid processing too many historical weeks
+        # Only process weeks that have data and are within max_date
+        recent_start = max(min_date, max_date - pd.to_timedelta(52, unit="D"))  # Only last 52 weeks
+        current_week = recent_start - pd.to_timedelta(recent_start.weekday(), unit="D")  # Monday of first week
         week_count = 0
         total_weeks = int((max_date - current_week).days / 7) + 1
+        
+        print(f"Processing only recent weeks from {current_week.date()} to {max_date.date()} ({total_weeks} weeks)")
         
         while current_week <= max_date:
             week_count += 1
@@ -611,7 +634,9 @@ def aggregate_traveling_unique_by_period(
                 
                 # For each group (if segment grouping), calculate metrics
                 if extra_cols:
-                    for group_vals, group_df in traveling_policies.groupby(extra_cols, dropna=False):
+                    # Handle single column case to avoid pandas warning
+                    groupby_cols = extra_cols[0] if len(extra_cols) == 1 else extra_cols
+                    for group_vals, group_df in traveling_policies.groupby(groupby_cols, dropna=False):
                         if not isinstance(group_vals, tuple):
                             group_vals = (group_vals,)
                         
@@ -679,7 +704,9 @@ def aggregate_traveling_unique_by_period(
                 
                 # For each group (if segment grouping), calculate metrics
                 if extra_cols:
-                    for group_vals, group_df in traveling_policies.groupby(extra_cols, dropna=False):
+                    # Handle single column case to avoid pandas warning
+                    groupby_cols = extra_cols[0] if len(extra_cols) == 1 else extra_cols
+                    for group_vals, group_df in traveling_policies.groupby(groupby_cols, dropna=False):
                         if not isinstance(group_vals, tuple):
                             group_vals = (group_vals,)
                         
@@ -731,7 +758,7 @@ def aggregate_traveling_unique_by_period(
     sort_cols = ["x", "year"] + extra_cols
     df_rec = df_rec.sort_values(sort_cols)
     
-    print(f"Completed {period} aggregation: {len(df_rec)} records")
+    print(f"Completed {scenario} aggregation: {len(df_rec)} records")
     return df_rec
 
 
