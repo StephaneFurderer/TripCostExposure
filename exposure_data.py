@@ -514,6 +514,105 @@ def aggregate_departures_by_period(
     return agg[["year", "x", "volume", "maxTripCostExposure", "avgTripCostPerNight"] + extra_cols]
 
 
+# ---------- Unique-per-period traveling aggregation ----------
+
+def _iter_nights_chunks_by_week(start_date: pd.Timestamp, nights: int):
+    current = start_date
+    remaining = int(nights)
+    while remaining > 0:
+        # ISO week starts on Monday (weekday=0)
+        week_start = current - pd.to_timedelta(current.weekday(), unit="D")
+        week_end = week_start + pd.to_timedelta(6, unit="D")
+        take = int(min(remaining, (week_end - current).days + 1))
+        yield week_start.normalize(), take
+        current = current + pd.to_timedelta(take, unit="D"); remaining -= take
+
+
+def _iter_nights_chunks_by_month(start_date: pd.Timestamp, nights: int):
+    current = start_date
+    remaining = int(nights)
+    while remaining > 0:
+        month_start = current.replace(day=1)
+        # next month start
+        if month_start.month == 12:
+            next_month = month_start.replace(year=month_start.year + 1, month=1, day=1)
+        else:
+            next_month = month_start.replace(month=month_start.month + 1, day=1)
+        month_end = next_month - pd.to_timedelta(1, unit="D")
+        take = int(min(remaining, (month_end - current).days + 1))
+        yield month_start.normalize(), take
+        current = current + pd.to_timedelta(take, unit="D"); remaining -= take
+
+
+def aggregate_traveling_unique_by_period(
+    df: pd.DataFrame,
+    period: str,
+    additional_group_by: Optional[Union[str, List[str]]] = None,
+) -> pd.DataFrame:
+    """
+    Unique-per-period traveling metrics (no daily summation):
+      - volume_unique: count policy once per period if active any day in that period
+      - maxTripCostExposure_unique: add tripCost once per period if active
+      - tripCostPerNightExposure_period: sum perNight for nights whose start falls in the period
+
+    period: 'week' or 'month'
+    """
+    period = period.lower()
+    if period not in {"week", "month"}:
+        raise ValueError("unique traveling aggregation supported only for 'week' or 'month'")
+
+    if additional_group_by is None:
+        extra_cols: List[str] = []
+    elif isinstance(additional_group_by, str):
+        extra_cols = [additional_group_by]
+    else:
+        extra_cols = list(additional_group_by)
+
+    tmp = df[["dateDepart", "dateReturn", "tripCost", "nightsCount"] + extra_cols].copy()
+    tmp["dateDepart"] = pd.to_datetime(tmp["dateDepart"]).dt.normalize()
+    tmp["dateReturn"] = pd.to_datetime(tmp["dateReturn"]).dt.normalize()
+
+    per_night = (tmp["tripCost"] / tmp["nightsCount"].replace(0, pd.NA)).fillna(0.0)
+
+    records = []
+    for i in range(len(tmp)):
+        d0 = pd.Timestamp(tmp.iloc[i]["dateDepart"]).normalize()
+        n = int(tmp.iloc[i]["nightsCount"])
+        if n <= 0:
+            continue
+        tcost = float(tmp.iloc[i]["tripCost"])
+        pn = float(per_night.iloc[i])
+        extras = [tmp.iloc[i][c] for c in extra_cols]
+
+        if period == "week":
+            for wk_start, take in _iter_nights_chunks_by_week(d0, n):
+                x_norm = pd.Timestamp(2000, 1, 3) + pd.to_timedelta((wk_start.isocalendar().week - 1) * 7, unit="D")
+                year = wk_start.year
+                records.append([year, x_norm, 1, tcost, pn * take] + extras)
+        else:  # month
+            for mo_start, take in _iter_nights_chunks_by_month(d0, n):
+                x_norm = pd.Timestamp(year=2000, month=mo_start.month, day=1)
+                year = mo_start.year
+                records.append([year, x_norm, 1, tcost, pn * take] + extras)
+
+    if not records:
+        cols = ["year", "x", "volume_unique", "maxTripCostExposure_unique", "tripCostPerNightExposure_period"] + extra_cols
+        return pd.DataFrame(columns=cols)
+
+    cols = ["year", "x", "volume_unique", "maxTripCostExposure_unique", "tripCostPerNightExposure_period"] + extra_cols
+    df_rec = pd.DataFrame.from_records(records, columns=cols)
+
+    group_cols = ["year", "x"] + extra_cols
+    agg = df_rec.groupby(group_cols, as_index=False).agg(
+        volume_unique=("volume_unique", "sum"),
+        maxTripCostExposure_unique=("maxTripCostExposure_unique", "sum"),
+        tripCostPerNightExposure_period=("tripCostPerNightExposure_period", "sum"),
+    )
+    sort_cols = ["x", "year"] + extra_cols
+    agg = agg.sort_values(sort_cols)
+    return agg
+
+
 # ---------- Precomputation helpers ----------
 
 def _agg_filename(folder: Path, kind: str, period: str, by_segment: bool) -> Path:
