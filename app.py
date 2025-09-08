@@ -270,8 +270,9 @@ st.markdown("---")
 st.subheader("Inspect policies for a specific ISO week")
 
 def iso_week_start(year: int, week: int) -> pd.Timestamp:
-    # ISO weeks start on Monday; pandas uses %G-%V-%u format via to_datetime
-    return pd.to_datetime(f"{year}-W{week:02d}-1")
+    # Robust ISO week start using Python's stdlib
+    import datetime as _dt
+    return pd.Timestamp(_dt.date.fromisocalendar(int(year), int(week), 1))
 
 def load_week_search_df() -> pd.DataFrame:
     if df is not None:
