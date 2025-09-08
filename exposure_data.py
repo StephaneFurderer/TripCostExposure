@@ -7,6 +7,7 @@ from typing import Optional, List, Union
 import pandas as pd
 import glob
 from pathlib import Path
+import time
 
 
 DEFAULT_CSV_PATH = os.path.join(os.path.dirname(__file__), "_data", "policies.csv")
@@ -504,5 +505,50 @@ def load_precomputed_aggregate(folder_path: str, kind: str, period: str, by_segm
             agg.to_parquet(path, index=False)
             return agg
     return None
+
+
+def precompute_all_with_timing(folder_path: str) -> pd.DataFrame:
+    """
+    Compute all aggregates (travel/depart x day/week/month x all/segment) and time each.
+    Returns a DataFrame report with columns: kind, period, scope, rows, seconds, created
+    """
+    folder = Path(folder_path)
+    combined_path = folder / "combined.parquet"
+    if not combined_path.exists():
+        raise FileNotFoundError(f"combined.parquet not found in {folder}")
+    df = pd.read_parquet(combined_path)
+
+    tasks = []
+    for kind in ["travel", "depart"]:
+        for period in ["day", "week", "month"]:
+            for by_segment in [False, True if "segment" in df.columns else False]:
+                if by_segment is False:
+                    tasks.append((kind, period, False))
+                elif by_segment is True:
+                    tasks.append((kind, period, True))
+
+    records = []
+    for kind, period, by_segment in tasks:
+        path = _agg_filename(folder, kind, period, by_segment)
+        t0 = time.perf_counter()
+        created = False
+        if kind == "travel":
+            agg = aggregate_traveling_by_period(df, period=period, additional_group_by=("segment" if by_segment else None))
+        else:
+            agg = aggregate_departures_by_period(df, period=period, additional_group_by=("segment" if by_segment else None))
+        agg.to_parquet(path, index=False)
+        created = True
+        t1 = time.perf_counter()
+        records.append({
+            "kind": kind,
+            "period": period,
+            "scope": "by_segment" if by_segment else "all",
+            "rows": len(agg),
+            "seconds": round(t1 - t0, 3),
+            "created": created,
+            "path": str(path),
+        })
+
+    return pd.DataFrame.from_records(records)
 
 

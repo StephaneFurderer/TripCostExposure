@@ -11,6 +11,7 @@ from exposure_data import (
     normalize_policies_df,
     load_folder_policies,
     load_precomputed_aggregate,
+    precompute_all_with_timing,
     aggregate_daily_exposure_by_departure_year,
     aggregate_exposure_by_departure_period,
     aggregate_traveling_by_period,
@@ -66,6 +67,13 @@ with st.sidebar:
                         os.remove(cache_path)
                 finally:
                     st.rerun()
+        # Precompute all aggregates with timing
+        if extract_date and selected_folder:
+            if st.button("Build all aggregates (timed)"):
+                with st.spinner("Precomputing aggregates..."):
+                    report = precompute_all_with_timing(selected_folder)
+                st.success("Precompute complete")
+                st.dataframe(report)
 
 df = get_data(use_dummy_data, selected_folder, erase_cache)
 
