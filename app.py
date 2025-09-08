@@ -442,11 +442,13 @@ if not search_df.empty:
     default_start = max(min_date, min(today, max_date))
     default_end = min(max_date, max(min_date, today + pd.Timedelta(days=7).to_pytimedelta()))
     
-    # Ensure defaults are within valid range
-    if default_start < min_date or default_start > max_date:
-        default_start = min_date
-    if default_end < min_date or default_end > max_date:
-        default_end = max_date
+    # Ensure defaults are within valid range - clamp to min/max dates
+    default_start = max(min_date, min(default_start, max_date))
+    default_end = max(min_date, min(default_end, max_date))
+    
+    # Ensure start is not after end
+    if default_start > default_end:
+        default_start = default_end
     col1, col2 = st.columns(2)
     with col1:
         start_q = st.date_input("Start date", value=default_start, min_value=min_date, max_value=max_date)

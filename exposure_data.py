@@ -853,7 +853,7 @@ def aggregate_traveling_unique_by_period(
                     # Extract country_class and region_class from group_vals
                     country_class = group_vals[0] if len(group_vals) > 0 else "null"
                     region_class = group_vals[1] if len(group_vals) > 1 else "Other"
-                    extra_vals = group_vals[2:] if len(group_vals) > 2 else []
+                    extra_vals = list(group_vals[2:]) if len(group_vals) > 2 else []
                     record = [year, x_norm, country_class, region_class, volume, maxTripCostExposure, tripCostPerNightExposure] + extra_vals
                     records.append(record)
             
@@ -912,7 +912,7 @@ def aggregate_traveling_unique_by_period(
                     # Extract country_class and region_class from group_vals
                     country_class = group_vals[0] if len(group_vals) > 0 else "null"
                     region_class = group_vals[1] if len(group_vals) > 1 else "Other"
-                    extra_vals = group_vals[2:] if len(group_vals) > 2 else []
+                    extra_vals = list(group_vals[2:]) if len(group_vals) > 2 else []
                     record = [year, x_norm, country_class, region_class, volume, maxTripCostExposure, tripCostPerNightExposure] + extra_vals
                     records.append(record)
             
