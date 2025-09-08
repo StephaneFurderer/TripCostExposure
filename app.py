@@ -91,25 +91,25 @@ df = None
 if use_dummy_data:
     # Only load data into memory for dummy mode
     df = get_data(use_dummy_data, selected_folder, erase_cache)
+
+# Apply country filter to both dummy and real data
+if df is not None and not df.empty:
+    # Create country filter mask
+    country_mask = pd.Series(False, index=df.index)
     
-    # Apply country filter
-    if df is not None and not df.empty:
-        # Create country filter mask
-        country_mask = pd.Series(False, index=df.index)
-        
-        if "US" in selected_countries:
-            country_mask |= (df['Country'] == 'US')
-        if "ROW" in selected_countries:
-            # ROW includes all countries that are not US and not null
-            country_mask |= ((df['Country'] != 'US') & (df['Country'].notna()))
-        if "null" in selected_countries:
-            country_mask |= df['Country'].isna()
-        
-        # Apply the filter
-        df = df[country_mask].copy()
-        
-        # Show filter summary
-        st.sidebar.caption(f"📊 Showing {len(df):,} policies after country filtering")
+    if "US" in selected_countries:
+        country_mask |= (df['Country'] == 'US')
+    if "ROW" in selected_countries:
+        # ROW includes all countries that are not US and not null
+        country_mask |= ((df['Country'] != 'US') & (df['Country'].notna()))
+    if "null" in selected_countries:
+        country_mask |= df['Country'].isna()
+    
+    # Apply the filter
+    df = df[country_mask].copy()
+    
+    # Show filter summary
+    st.sidebar.caption(f"📊 Showing {len(df):,} policies after country filtering")
 
 group_by_segment = st.checkbox("Group by Segment", value=False)
 # Default to week/all for fast initial load
