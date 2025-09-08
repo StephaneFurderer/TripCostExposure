@@ -110,7 +110,7 @@ if group_by_segment:
             if period == "day":
                 data = aggregate_traveling_by_period(df_use, period=period, additional_group_by="segment")
             else:
-                data = aggregate_traveling_unique_by_period(df_use, period=period, additional_group_by="segment")
+                data = aggregate_traveling_unique_by_period(df_use, period=period, additional_group_by="segment", folder_path=selected_folder)
         years = sorted(data["year"].unique().tolist())
         if year_order_choice == "Descending":
             years = list(reversed(years))
@@ -153,7 +153,7 @@ else:
             if period == "day":
                 data = aggregate_traveling_by_period(df, period=period)
             else:
-                data = aggregate_traveling_unique_by_period(df, period=period)
+                data = aggregate_traveling_unique_by_period(df, period=period, folder_path=selected_folder)
         years = sorted(data["year"].unique().tolist())
         if year_order_choice == "Descending":
             years = list(reversed(years))

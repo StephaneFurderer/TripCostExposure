@@ -553,6 +553,7 @@ def aggregate_traveling_unique_by_period(
     period: str,
     additional_group_by: Optional[Union[str, List[str]]] = None,
     max_date: Optional[pd.Timestamp] = None,
+    folder_path: Optional[str] = None,
 ) -> pd.DataFrame:
     """
     Unique-per-period traveling metrics (no daily summation):
@@ -588,9 +589,25 @@ def aggregate_traveling_unique_by_period(
     min_date = all_dates.min()
     data_max_date = all_dates.max()
     
-    # Set default max_date to 3 weeks after today if not provided
+    # Set default max_date to 1 year after extraction date if not provided
     if max_date is None:
-        max_date = pd.Timestamp.now() + pd.to_timedelta(21, unit="D")
+        if folder_path:
+            # Extract date from folder path (assumes folder name is YYYY-MM-DD format)
+            import os
+            folder_name = os.path.basename(folder_path)
+            try:
+                # Try to parse YYYY-MM-DD format
+                extraction_date = pd.to_datetime(folder_name)
+                max_date = extraction_date + pd.to_timedelta(365, unit="D")
+                print(f"Using extraction date {extraction_date.date()}, max_date set to {max_date.date()}")
+            except:
+                # Fallback to 1 year after today if folder name doesn't match expected format
+                max_date = pd.Timestamp.now() + pd.to_timedelta(365, unit="D")
+                print(f"Could not parse folder date from '{folder_name}', using 1 year from today: {max_date.date()}")
+        else:
+            # Fallback to 1 year after today if no folder path provided
+            max_date = pd.Timestamp.now() + pd.to_timedelta(365, unit="D")
+            print(f"No folder path provided, using 1 year from today: {max_date.date()}")
     
     # If max_date is in the future compared to data, use the data's max date instead
     if max_date > data_max_date:
@@ -610,14 +627,12 @@ def aggregate_traveling_unique_by_period(
     print(f"Processing {scenario} aggregation from {min_date.date()} to {max_date.date()}")
     
     if period == "week":
-        # Start from a more recent date to avoid processing too many historical weeks
-        # Only process weeks that have data and are within max_date
-        recent_start = max(min_date, max_date - pd.to_timedelta(52, unit="D"))  # Only last 52 weeks
-        current_week = recent_start - pd.to_timedelta(recent_start.weekday(), unit="D")  # Monday of first week
+        # Process all weeks from min_date to max_date
+        current_week = min_date - pd.to_timedelta(min_date.weekday(), unit="D")  # Monday of first week
         week_count = 0
         total_weeks = int((max_date - current_week).days / 7) + 1
         
-        print(f"Processing only recent weeks from {current_week.date()} to {max_date.date()} ({total_weeks} weeks)")
+        print(f"Processing all weeks from {current_week.date()} to {max_date.date()} ({total_weeks} weeks)")
         
         while current_week <= max_date:
             week_count += 1
@@ -786,13 +801,13 @@ def precompute_aggregates(folder: Path) -> None:
         if period == "day":
             agg_travel_all = aggregate_traveling_by_period(df, period=period)
         else:
-            agg_travel_all = aggregate_traveling_unique_by_period(df, period=period)
+            agg_travel_all = aggregate_traveling_unique_by_period(df, period=period, folder_path=str(folder))
         agg_travel_all.to_parquet(_agg_filename(folder, "travel", period, False), index=False)
         if "segment" in df.columns:
             if period == "day":
                 agg_travel_seg = aggregate_traveling_by_period(df, period=period, additional_group_by="segment")
             else:
-                agg_travel_seg = aggregate_traveling_unique_by_period(df, period=period, additional_group_by="segment")
+                agg_travel_seg = aggregate_traveling_unique_by_period(df, period=period, additional_group_by="segment", folder_path=str(folder))
             agg_travel_seg.to_parquet(_agg_filename(folder, "travel", period, True), index=False)
 
         # Departures
@@ -848,7 +863,7 @@ def precompute_all_with_timing(folder_path: str) -> pd.DataFrame:
             if period == "day":
                 agg = aggregate_traveling_by_period(df, period=period, additional_group_by=("segment" if by_segment else None))
             else:
-                agg = aggregate_traveling_unique_by_period(df, period=period, additional_group_by=("segment" if by_segment else None))
+                agg = aggregate_traveling_unique_by_period(df, period=period, additional_group_by=("segment" if by_segment else None), folder_path=str(folder))
         else:
             agg = aggregate_departures_by_period(df, period=period, additional_group_by=("segment" if by_segment else None))
         agg.to_parquet(path, index=False)
