@@ -18,6 +18,13 @@ class ExposureDataConfig:
 
 
 def normalize_policies_df(df: pd.DataFrame) -> pd.DataFrame:
+    MISSING_TOKENS = {None, "", " ", "NA", "N/A", "<N/A>", "NULL", "null", "NaN", "nan"}
+
+    def _string_clean(col: pd.Series) -> pd.Series:
+        s = col.astype("string")
+        s = s.replace(list(MISSING_TOKENS), pd.NA)
+        return s
+
     """
     Apply the same sanity checks/normalization for both dummy and real data.
     - Types for key fields
@@ -67,21 +74,27 @@ def normalize_policies_df(df: pd.DataFrame) -> pd.DataFrame:
             df["ZipCode"] = df[candidate]
     if "ZipCode" in df.columns:
         # Preserve non-US alphanumeric; standardize only if numeric up to 5 digits
-        zorig = df["ZipCode"].astype("string")
+        zorig = _string_clean(df["ZipCode"])  # normalize missing tokens first
         is_numeric_zip = zorig.str.fullmatch(r"\d{1,5}")
         standardized = zorig.where(~is_numeric_zip, zorig.str.zfill(5))
-        df["ZipCode"] = standardized
+        df["ZipCode"] = standardized.astype("string")
 
     # Optional categoricals/strings
     # Keep segment as plain string (per requirements)
     if "segment" in df.columns:
-        df["segment"] = df["segment"].astype("string")
+        df["segment"] = _string_clean(df["segment"]).astype("string")
     if "Country" in df.columns:
-        df["Country"] = df["Country"].astype("string")
+        df["Country"] = _string_clean(df["Country"]).astype("string")
 
     # Ensure idpol as string if present
     if "idpol" in df.columns:
-        df["idpol"] = df["idpol"].astype("string")
+        df["idpol"] = _string_clean(df["idpol"]).astype("string")
+
+    # Optional state normalization: keep as string and allow missing
+    lower_cols = {c.lower(): c for c in df.columns}
+    if "state" in lower_cols:
+        col = lower_cols["state"]
+        df[col] = _string_clean(df[col]).astype("string")
 
     return df
 
@@ -152,6 +165,21 @@ def load_folder_policies(folder_path: str, force_rebuild: bool = False, erase_ca
         raise ValueError(f"No readable CSV files in folder: {folder}")
 
     combined = pd.concat(frames, ignore_index=True, sort=False)
+    # Ensure Arrow-friendly dtypes before parquet write
+    for col in ["segment", "ZipCode", "Country", "idpol"]:
+        if col in combined.columns:
+            combined[col] = combined[col].astype("string")
+    # Datetime columns
+    for col in ["dateApp", "dateDepart", "dateReturn"]:
+        if col in combined.columns:
+            combined[col] = pd.to_datetime(combined[col], errors="coerce")
+    # Integers as regular ints (nightsCount) and floats (tripCost)
+    if "nightsCount" in combined.columns:
+        combined["nightsCount"] = pd.to_numeric(combined["nightsCount"], errors="coerce").astype("Int64")
+    if "travelersCount" in combined.columns:
+        combined["travelersCount"] = pd.to_numeric(combined["travelersCount"], errors="coerce").astype("Int64")
+    if "tripCost" in combined.columns:
+        combined["tripCost"] = pd.to_numeric(combined["tripCost"], errors="coerce").astype(float)
     # Persist parquet cache
     combined.to_parquet(cache_path, index=False)
     return combined
