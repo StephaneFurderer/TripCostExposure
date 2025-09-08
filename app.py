@@ -37,6 +37,16 @@ def get_data(use_dummy: bool, folder_path: str | None, erase_cache: bool) -> pd.
 with st.sidebar:
     st.header("Data Source")
     use_dummy_data = st.checkbox("Use dummy data", value=True, help="Toggle to use packaged sample dataset")
+    
+    # Country filter
+    st.header("Country Filter")
+    country_filter_options = ["US", "ROW", "null"]
+    selected_countries = st.multiselect(
+        "Select countries to include",
+        options=country_filter_options,
+        default=country_filter_options,
+        help="US: United States, ROW: Rest of World, null: Missing country data"
+    )
     selected_folder = None
     erase_cache = False
     if not use_dummy_data:
@@ -81,6 +91,24 @@ df = None
 if use_dummy_data:
     # Only load data into memory for dummy mode
     df = get_data(use_dummy_data, selected_folder, erase_cache)
+    
+    # Apply country filter
+    if df is not None and not df.empty:
+        # Create country filter mask
+        country_mask = pd.Series(False, index=df.index)
+        
+        if "US" in selected_countries:
+            country_mask |= (df['Country'] == 'US')
+        if "ROW" in selected_countries:
+            country_mask |= (df['Country'] == 'ROW')
+        if "null" in selected_countries:
+            country_mask |= df['Country'].isna()
+        
+        # Apply the filter
+        df = df[country_mask].copy()
+        
+        # Show filter summary
+        st.sidebar.caption(f"📊 Showing {len(df):,} policies after country filtering")
 
 group_by_segment = st.checkbox("Group by Segment", value=False)
 # Default to week/all for fast initial load

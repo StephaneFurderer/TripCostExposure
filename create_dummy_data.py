@@ -212,7 +212,13 @@ def generate_policies(num_policies: int) -> List[dict]:
 
         # ZIP and country
         zip_code = random_us_zip_code()
-        country = "US"
+        # Add variety to countries: 80% US, 15% ROW, 5% null/missing
+        country_choice = random.choices(
+            ["US", "ROW", None], 
+            weights=[0.8, 0.15, 0.05], 
+            k=1
+        )[0]
+        country = country_choice
 
         policies.append(
             {
