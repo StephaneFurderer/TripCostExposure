@@ -207,3 +207,58 @@ fig.update_layout(legend_title_text="Departure Year", hovermode="x unified")
 st.plotly_chart(fig, use_container_width=True)
 
 
+
+# Search policies traveling during a period
+st.markdown("---")
+st.subheader("Search policies traveling during a period")
+
+def load_search_df() -> pd.DataFrame:
+    # Use already loaded df for dummy mode; otherwise read combined.parquet from selected folder
+    if df is not None:
+        base = df.copy()
+    else:
+        if not selected_folder:
+            st.info("Select an extract folder in the sidebar to search real data.")
+            return pd.DataFrame()
+        combined_path = os.path.join(selected_folder, "combined.parquet")
+        if not os.path.exists(combined_path):
+            st.warning("combined.parquet not found. Click 'Build all aggregates (timed)' or reload the extract.")
+            return pd.DataFrame()
+        base = pd.read_parquet(combined_path)
+    # Ensure datetime types
+    for c in ["dateDepart", "dateReturn", "dateApp"]:
+        if c in base.columns:
+            base[c] = pd.to_datetime(base[c], errors="coerce")
+    return base
+
+search_df = load_search_df()
+
+if not search_df.empty:
+    min_date = pd.to_datetime(search_df["dateDepart"].min()).date()
+    max_date = pd.to_datetime(search_df["dateReturn"].max()).date()
+    col1, col2 = st.columns(2)
+    with col1:
+        start_q = st.date_input("Start date", value=min_date, min_value=min_date, max_value=max_date)
+    with col2:
+        end_q = st.date_input("End date", value=max_date, min_value=min_date, max_value=max_date)
+
+    if start_q > end_q:
+        st.error("Start date must be before or equal to end date.")
+    else:
+        # Overlap condition: dateDepart <= end AND dateReturn >= start covers the three cases listed
+        start_ts = pd.Timestamp(start_q)
+        end_ts = pd.Timestamp(end_q)
+        mask = (search_df["dateDepart"] <= end_ts) & (search_df["dateReturn"] >= start_ts)
+        results = search_df.loc[mask].copy()
+        st.caption(f"Matching policies: {len(results):,}")
+        # Show a compact set of useful columns when present
+        preferred_cols = [
+            "idpol", "segment", "dateApp", "dateDepart", "dateReturn",
+            "tripCost", "nightsCount", "travelersCount", "ZipCode", "Country", "State",
+        ]
+        cols_to_show = [c for c in preferred_cols if c in results.columns]
+        if not cols_to_show:
+            cols_to_show = list(results.columns)
+        st.dataframe(results[cols_to_show].sort_values("dateDepart").head(1000), use_container_width=True)
+        if len(results) > 1000:
+            st.info("Showing first 1,000 rows. Refine your date range to narrow results.")
