@@ -52,13 +52,27 @@ def normalize_policies_df(df: pd.DataFrame) -> pd.DataFrame:
         df["nightsCount"] = df["nightsCount"].fillna(0)
     df["nightsCount"] = df["nightsCount"].astype(int)
 
+    # Handle ZIP code variants and preserve leading zeros
+    if "ZipCode" not in df.columns:
+        # search common variants case-insensitively
+        lower_cols = {c.lower(): c for c in df.columns}
+        candidate = None
+        for key in ["zipcode", "zip", "zip_code", "postalcode", "postal_code"]:
+            if key in lower_cols:
+                candidate = lower_cols[key]
+                break
+        if candidate is not None:
+            df["ZipCode"] = df[candidate]
+    if "ZipCode" in df.columns:
+        # keep as string and zero-pad 5 if purely US 5-digit
+        z = df["ZipCode"].astype("string").str.replace(r"[^0-9]", "", regex=True)
+        df["ZipCode"] = z.str.zfill(5)
+
     # Optional categoricals/strings
     if "segment" in df.columns:
         df["segment"] = df["segment"].astype("category")
     if "Country" in df.columns:
-        df["Country"] = df["Country"].astype("category")
-    if "ZipCode" in df.columns:
-        df["ZipCode"] = df["ZipCode"].astype("string")
+        df["Country"] = df["Country"] .astype("category")
 
     return df
 
