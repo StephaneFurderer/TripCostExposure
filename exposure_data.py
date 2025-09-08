@@ -36,11 +36,9 @@ def normalize_policies_df(df: pd.DataFrame) -> pd.DataFrame:
     else:
         df["tripCost"] = 0.0
 
-    # Travelers default to 1
-    if "travelersCount" not in df.columns:
-        df["travelersCount"] = 1
-    else:
-        df["travelersCount"] = pd.to_numeric(df["travelersCount"], errors="coerce").fillna(1).astype(int)
+    # Travelers: if present, coerce numeric but keep missing (no default)
+    if "travelersCount" in df.columns:
+        df["travelersCount"] = pd.to_numeric(df["travelersCount"], errors="coerce")
 
     # Nights count
     if "nightsCount" not in df.columns:
@@ -49,8 +47,12 @@ def normalize_policies_df(df: pd.DataFrame) -> pd.DataFrame:
         df["nightsCount"] = (df["dateReturn"] - df["dateDepart"]).dt.days
     else:
         df["nightsCount"] = pd.to_numeric(df["nightsCount"], errors="coerce")
-        df["nightsCount"] = df["nightsCount"].fillna(0)
+    # Drop zero or negative nights (same-day or invalid)
+    df = df[df["nightsCount"] > 0]
     df["nightsCount"] = df["nightsCount"].astype(int)
+
+    # Enforce positive tripCost per requirements
+    df = df[df["tripCost"] > 0]
 
     # Handle ZIP code variants and preserve leading zeros
     if "ZipCode" not in df.columns:
@@ -64,15 +66,22 @@ def normalize_policies_df(df: pd.DataFrame) -> pd.DataFrame:
         if candidate is not None:
             df["ZipCode"] = df[candidate]
     if "ZipCode" in df.columns:
-        # keep as string and zero-pad 5 if purely US 5-digit
-        z = df["ZipCode"].astype("string").str.replace(r"[^0-9]", "", regex=True)
-        df["ZipCode"] = z.str.zfill(5)
+        # Preserve non-US alphanumeric; standardize only if numeric up to 5 digits
+        zorig = df["ZipCode"].astype("string")
+        is_numeric_zip = zorig.str.fullmatch(r"\d{1,5}")
+        standardized = zorig.where(~is_numeric_zip, zorig.str.zfill(5))
+        df["ZipCode"] = standardized
 
     # Optional categoricals/strings
+    # Keep segment as plain string (per requirements)
     if "segment" in df.columns:
-        df["segment"] = df["segment"].astype("category")
+        df["segment"] = df["segment"].astype("string")
     if "Country" in df.columns:
-        df["Country"] = df["Country"] .astype("category")
+        df["Country"] = df["Country"].astype("string")
+
+    # Ensure idpol as string if present
+    if "idpol" in df.columns:
+        df["idpol"] = df["idpol"].astype("string")
 
     return df
 
