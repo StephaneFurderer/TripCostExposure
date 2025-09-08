@@ -188,6 +188,12 @@ def load_folder_policies(folder_path: str, force_rebuild: bool = False, erase_ca
         combined["tripCost"] = pd.to_numeric(combined["tripCost"], errors="coerce").astype(float)
     # Persist parquet cache
     combined.to_parquet(cache_path, index=False)
+    # Build precomputed aggregates for fast UI
+    try:
+        precompute_aggregates(folder)
+    except Exception:
+        # Do not fail the load if precompute has issues
+        pass
     return combined
 
 
@@ -447,5 +453,56 @@ def aggregate_departures_by_period(
     sort_cols = ["x", "year"] + extra_cols
     agg = agg.sort_values(sort_cols)
     return agg[["year", "x", "volume", "maxTripCostExposure", "avgTripCostPerNight"] + extra_cols]
+
+
+# ---------- Precomputation helpers ----------
+
+def _agg_filename(folder: Path, kind: str, period: str, by_segment: bool) -> Path:
+    suffix = "by_segment" if by_segment else "all"
+    return folder / f"agg_{kind}_{period}_{suffix}.parquet"
+
+
+def precompute_aggregates(folder: Path) -> None:
+    """
+    Precompute key aggregates from combined.parquet into small parquet files for fast dashboarding.
+    Creates:
+      - agg_travel_{day,week,month}_{all,by_segment}.parquet
+      - agg_depart_{day,week,month}_{all,by_segment}.parquet
+    """
+    combined_path = folder / "combined.parquet"
+    if not combined_path.exists():
+        return
+    df = pd.read_parquet(combined_path)
+
+    for period in ["day", "week", "month"]:
+        # Traveling
+        agg_travel_all = aggregate_traveling_by_period(df, period=period)
+        agg_travel_all.to_parquet(_agg_filename(folder, "travel", period, False), index=False)
+        if "segment" in df.columns:
+            agg_travel_seg = aggregate_traveling_by_period(df, period=period, additional_group_by="segment")
+            agg_travel_seg.to_parquet(_agg_filename(folder, "travel", period, True), index=False)
+
+        # Departures
+        agg_dep_all = aggregate_departures_by_period(df, period=period)
+        agg_dep_all.to_parquet(_agg_filename(folder, "depart", period, False), index=False)
+        if "segment" in df.columns:
+            agg_dep_seg = aggregate_departures_by_period(df, period=period, additional_group_by="segment")
+            agg_dep_seg.to_parquet(_agg_filename(folder, "depart", period, True), index=False)
+
+
+def load_precomputed_aggregate(folder_path: str, kind: str, period: str, by_segment: bool) -> Optional[pd.DataFrame]:
+    folder = Path(folder_path)
+    path = _agg_filename(folder, kind, period, by_segment)
+    if path.exists():
+        return pd.read_parquet(path)
+    # Ensure week/all travel aggregate exists at minimum
+    if kind == "travel" and period == "week" and by_segment is False:
+        combined_path = folder / "combined.parquet"
+        if combined_path.exists():
+            df = pd.read_parquet(combined_path)
+            agg = aggregate_traveling_by_period(df, period="week")
+            agg.to_parquet(path, index=False)
+            return agg
+    return None
 
 

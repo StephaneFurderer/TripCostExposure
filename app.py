@@ -10,6 +10,7 @@ from exposure_data import (
     load_policies,
     normalize_policies_df,
     load_folder_policies,
+    load_precomputed_aggregate,
     aggregate_daily_exposure_by_departure_year,
     aggregate_exposure_by_departure_period,
     aggregate_traveling_by_period,
@@ -69,7 +70,8 @@ with st.sidebar:
 df = get_data(use_dummy_data, selected_folder, erase_cache)
 
 group_by_segment = st.checkbox("Group by Segment", value=False)
-period = st.selectbox("Time grain", options=["day", "week", "month"], index=0)
+# Default to week/all for fast initial load
+period = st.selectbox("Time grain", options=["day", "week", "month"], index=1)
 metric_mode = st.radio("Metric base", options=["Departures", "Traveling"], index=0, horizontal=True)
 year_order_choice = st.selectbox("Departure Year order", options=["Ascending", "Descending"], index=0)
 # Unified metric selector based on mode
@@ -88,7 +90,8 @@ if group_by_segment:
     selected_segments = st.multiselect("Select segments", segments, default=segments)
     df_use = df[df["segment"].astype(str).isin(selected_segments)]
     if metric_mode == "Traveling":
-        data = aggregate_traveling_by_period(
+        pre = load_precomputed_aggregate(selected_folder, kind="travel", period=period, by_segment=True)
+        data = pre if pre is not None else aggregate_traveling_by_period(
             df_use, period=period, additional_group_by="segment"
         )
         years = sorted(data["year"].unique().tolist())
@@ -107,7 +110,8 @@ if group_by_segment:
             labels={"x": f"{period.title()} (normalized)", ycol: ycol, "year": "Year", "segment": "Segment"},
         )
     else:
-        data = aggregate_departures_by_period(df_use, period=period, additional_group_by="segment")
+        pre = load_precomputed_aggregate(selected_folder, kind="depart", period=period, by_segment=True)
+        data = pre if pre is not None else aggregate_departures_by_period(df_use, period=period, additional_group_by="segment")
         years = sorted(data["year"].unique().tolist())
         if year_order_choice == "Descending":
             years = list(reversed(years))
@@ -125,7 +129,8 @@ if group_by_segment:
         )
 else:
     if metric_mode == "Traveling":
-        data = aggregate_traveling_by_period(df, period=period)
+        pre = load_precomputed_aggregate(selected_folder, kind="travel", period=period, by_segment=False) if not use_dummy_data else None
+        data = pre if pre is not None else aggregate_traveling_by_period(df, period=period)
         years = sorted(data["year"].unique().tolist())
         if year_order_choice == "Descending":
             years = list(reversed(years))
@@ -141,7 +146,8 @@ else:
             labels={"x": f"{period.title()} (normalized)", ycol: ycol, "year": "Year"},
         )
     else:
-        data = aggregate_departures_by_period(df, period=period)
+        pre = load_precomputed_aggregate(selected_folder, kind="depart", period=period, by_segment=False) if not use_dummy_data else None
+        data = pre if pre is not None else aggregate_departures_by_period(df, period=period)
         years = sorted(data["year"].unique().tolist())
         if year_order_choice == "Descending":
             years = list(reversed(years))
