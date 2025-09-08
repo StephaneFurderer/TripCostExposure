@@ -34,7 +34,23 @@ def main() -> None:
 
     if args.rebuild_combined or not combined_path.exists():
         print(f"- Building combined.parquet from CSVs in {folder}")
-        df_combined = load_folder_policies(str(folder), force_rebuild=True, erase_cache=False)
+        # Load without precomputing aggregates to avoid redundancy
+        from exposure_data import _read_policy_csv, normalize_policies_df
+        import glob
+        
+        csv_files = list(folder.glob("*.csv"))
+        if not csv_files:
+            raise FileNotFoundError(f"No CSV files found in {folder}")
+        
+        dfs = []
+        for csv_file in csv_files:
+            df = _read_policy_csv(str(csv_file))
+            dfs.append(df)
+        
+        df_combined = pd.concat(dfs, ignore_index=True)
+        df_combined = normalize_policies_df(df_combined)
+        df_combined.to_parquet(combined_path, index=False)
+        print(f"Saved combined.parquet with {len(df_combined)} policies")
     else:
         print(f"- Loading existing {combined_path}")
         df_combined = pd.read_parquet(combined_path)
