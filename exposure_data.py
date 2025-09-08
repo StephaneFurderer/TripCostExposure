@@ -392,15 +392,7 @@ def compute_traveling_daily(
         deltas_full = pd.concat(grids, ignore_index=True)
         sort_cols = extra_cols + ["day"]
         deltas_full = deltas_full.sort_values(sort_cols)
-        # cumulative sum within each group
-        daily = deltas_full.groupby(extra_cols, dropna=False).agg({
-            "day": "apply",
-            "volume": "cumsum",
-            "maxTripCostExposure": "cumsum",
-            "tripCostPerNightExposure": "cumsum",
-        })
-        # The aggregation above nests day; reconstruct frame
-        # Easier approach: perform cumsum via transform
+        # Perform cumulative sums via group-wise transform
         deltas_full = deltas_full.sort_values(sort_cols)
         for col in ["volume", "maxTripCostExposure", "tripCostPerNightExposure"]:
             deltas_full[col] = deltas_full.groupby(extra_cols, dropna=False)[col].cumsum()
