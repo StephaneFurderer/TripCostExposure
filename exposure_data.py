@@ -380,7 +380,10 @@ def compute_traveling_daily(
             if not isinstance(keys, tuple):
                 keys = (keys,)
             idx = pd.Index(full_days, name="day")
-            g = grp.set_index("day").reindex(idx, fill_value=0)
+            # Only reindex numeric metric columns to avoid string fill errors
+            metric_cols = ["volume", "maxTripCostExposure", "tripCostPerNightExposure"]
+            grp_metrics = grp[["day"] + metric_cols]
+            g = grp_metrics.set_index("day").reindex(idx, fill_value=0)
             # Add back extra cols as columns
             for i, c in enumerate(extra_cols):
                 g[c] = keys[i]
