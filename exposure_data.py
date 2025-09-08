@@ -574,26 +574,63 @@ def aggregate_traveling_unique_by_period(
 
     per_night = (tmp["tripCost"] / tmp["nightsCount"].replace(0, pd.NA)).fillna(0.0)
 
+    # More efficient approach: iterate through policies and assign to periods
     records = []
+    
     for i in range(len(tmp)):
-        d0 = pd.Timestamp(tmp.iloc[i]["dateDepart"]).normalize()
-        n = int(tmp.iloc[i]["nightsCount"])
-        if n <= 0:
-            continue
+        d0 = tmp.iloc[i]["dateDepart"]
+        d1 = tmp.iloc[i]["dateReturn"]
         tcost = float(tmp.iloc[i]["tripCost"])
         pn = float(per_night.iloc[i])
         extras = [tmp.iloc[i][c] for c in extra_cols]
-
+        
         if period == "week":
-            for wk_start, take in _iter_nights_chunks_by_week(d0, n):
-                x_norm = pd.Timestamp(2000, 1, 3) + pd.to_timedelta((wk_start.isocalendar().week - 1) * 7, unit="D")
-                year = wk_start.year
-                records.append([year, x_norm, 1, tcost, pn * take] + extras)
+            # Find all weeks this policy overlaps with
+            current = d0
+            while current <= d1:
+                # Get Monday of current week
+                week_start = current - pd.to_timedelta(current.weekday(), unit="D")
+                week_end = week_start + pd.to_timedelta(6, unit="D")
+                
+                # Check if policy overlaps with this week
+                if d0 <= week_end and d1 >= week_start:
+                    # Calculate nights in this week
+                    start_in_week = max(d0, week_start)
+                    end_in_week = min(d1, week_end)
+                    nights_in_week = (end_in_week - start_in_week).days + 1
+                    
+                    x_norm = pd.Timestamp(2000, 1, 3) + pd.to_timedelta((week_start.isocalendar().week - 1) * 7, unit="D")
+                    year = week_start.year
+                    
+                    records.append([year, x_norm, 1, tcost, pn * nights_in_week] + extras)
+                
+                # Move to next week
+                current = week_end + pd.to_timedelta(1, unit="D")
         else:  # month
-            for mo_start, take in _iter_nights_chunks_by_month(d0, n):
-                x_norm = pd.Timestamp(year=2000, month=mo_start.month, day=1)
-                year = mo_start.year
-                records.append([year, x_norm, 1, tcost, pn * take] + extras)
+            # Find all months this policy overlaps with
+            current = d0.replace(day=1)
+            while current <= d1:
+                # Get month boundaries
+                if current.month == 12:
+                    next_month = current.replace(year=current.year + 1, month=1, day=1)
+                else:
+                    next_month = current.replace(month=current.month + 1, day=1)
+                month_end = next_month - pd.to_timedelta(1, unit="D")
+                
+                # Check if policy overlaps with this month
+                if d0 <= month_end and d1 >= current:
+                    # Calculate nights in this month
+                    start_in_month = max(d0, current)
+                    end_in_month = min(d1, month_end)
+                    nights_in_month = (end_in_month - start_in_month).days + 1
+                    
+                    x_norm = pd.Timestamp(year=2000, month=current.month, day=1)
+                    year = current.year
+                    
+                    records.append([year, x_norm, 1, tcost, pn * nights_in_month] + extras)
+                
+                # Move to next month
+                current = next_month
 
     if not records:
         cols = ["year", "x", "volume_unique", "maxTripCostExposure_unique", "tripCostPerNightExposure_period"] + extra_cols
