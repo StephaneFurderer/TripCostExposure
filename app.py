@@ -58,21 +58,22 @@ with st.sidebar:
         extract_date = st.selectbox("Extract date", options=candidates, index=0 if candidates else None)
         if extract_date:
             selected_folder = os.path.join(data_root, extract_date)
-        # One-click erase parquet and reload
-        if extract_date:
-            cache_path = os.path.join(selected_folder, "combined.parquet")
-            if st.button("Erase parquet and reload"):
-                try:
-                    if os.path.exists(cache_path):
-                        os.remove(cache_path)
-                finally:
-                    st.rerun()
-        # Precompute all aggregates with timing
+        # Clean and rebuild all parquet artifacts
         if extract_date and selected_folder:
-            if st.button("Build all aggregates (timed)"):
-                with st.spinner("Precomputing aggregates..."):
+            if st.button("Rebuild all parquet (clean + precompute)"):
+                with st.spinner("Cleaning parquet files..."):
+                    for name in os.listdir(selected_folder):
+                        if name.endswith(".parquet"):
+                            try:
+                                os.remove(os.path.join(selected_folder, name))
+                            except Exception:
+                                pass
+                with st.spinner("Rebuilding combined.parquet from CSVs..."):
+                    # Force rebuild combined and trigger precompute from loader
+                    _ = load_folder_policies(selected_folder, force_rebuild=True, erase_cache=False)
+                with st.spinner("Precomputing all aggregates (timed)..."):
                     report = precompute_all_with_timing(selected_folder)
-                st.success("Precompute complete")
+                st.success("All parquet files rebuilt.")
                 st.dataframe(report)
 
 df = None
@@ -265,3 +266,64 @@ if not search_df.empty:
             cols_to_show = list(results.columns)
         st.dataframe(results[cols_to_show].sort_values("dateDepart"), use_container_width=True)
         
+st.markdown("---")
+st.subheader("Inspect policies for a specific ISO week")
+
+def iso_week_start(year: int, week: int) -> pd.Timestamp:
+    # ISO weeks start on Monday; pandas uses %G-%V-%u format via to_datetime
+    return pd.to_datetime(f"{year}-W{week:02d}-1")
+
+def load_week_search_df() -> pd.DataFrame:
+    if df is not None:
+        base = df.copy()
+    else:
+        if not selected_folder:
+            st.info("Select an extract folder in the sidebar to inspect a week.")
+            return pd.DataFrame()
+        combined_path = os.path.join(selected_folder, "combined.parquet")
+        if not os.path.exists(combined_path):
+            st.warning("combined.parquet not found. Rebuild parquets first.")
+            return pd.DataFrame()
+        base = pd.read_parquet(combined_path)
+    for c in ["dateDepart", "dateReturn", "dateApp"]:
+        if c in base.columns:
+            base[c] = pd.to_datetime(base[c], errors="coerce")
+    return base
+
+week_df = load_week_search_df()
+if not week_df.empty:
+    years = sorted(week_df["dateDepart"].dt.year.dropna().astype(int).unique().tolist())
+    default_year = years[-1] if years else pd.Timestamp.today().year
+    c1, c2 = st.columns(2)
+    with c1:
+        sel_year = st.number_input("Year", min_value=1900, max_value=2100, value=int(default_year), step=1)
+    with c2:
+        sel_week = st.number_input("ISO Week", min_value=1, max_value=53, value=int(pd.Timestamp.today().isocalendar().week), step=1)
+
+    wk_start = iso_week_start(int(sel_year), int(sel_week))
+    wk_end = wk_start + pd.to_timedelta(6, unit="D")
+    st.caption(f"Week {int(sel_week)} of {int(sel_year)}: start={wk_start.date()} end={wk_end.date()}")
+
+    # Overlap if any travel day intersects the week: depart <= wk_end and return > wk_start (night-start convention)
+    mask_overlap = (week_df["dateDepart"] <= wk_end) & (week_df["dateReturn"] > wk_start)
+    sel = week_df.loc[mask_overlap].copy()
+
+    # Compute per-night price
+    sel["perNight"] = (sel["tripCost"] / sel["nightsCount"].replace(0, pd.NA)).fillna(0.0)
+    # Nights counted by start date: from dateDepart to dateReturn-1
+    night_range_start = sel["dateDepart"]
+    night_range_end = sel["dateReturn"] - pd.to_timedelta(1, unit="D")
+    overlap_start = night_range_start.where(night_range_start > wk_start, wk_start)
+    overlap_end = night_range_end.where(night_range_end < wk_end, wk_end)
+    delta = (overlap_end - overlap_start).dt.days + 1
+    sel["nightsInWeek"] = delta.clip(lower=0).fillna(0).astype(int)
+    sel["remainingTripCost"] = (sel["nightsInWeek"] * sel["perNight"]).round(2)
+
+    show_cols = [
+        c for c in [
+            "idpol", "segment", "dateApp", "dateDepart", "dateReturn",
+            "nightsCount", "nightsInWeek", "tripCost", "perNight", "remainingTripCost",
+            "ZipCode", "Country", "State",
+        ] if c in sel.columns
+    ]
+    st.dataframe(sel[show_cols].sort_values(["nightsInWeek", "dateDepart"], ascending=[False, True]), use_container_width=True)
