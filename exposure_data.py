@@ -125,6 +125,12 @@ def _read_policy_csv(path: str) -> pd.DataFrame:
         parse_dates=["dateApp", "dateDepart", "dateReturn"],
         infer_datetime_format=True,
     )
+    # Normalize ZIP column name at import: rename any alias to 'ZipCode'
+    lower_cols = {c.lower(): c for c in df.columns}
+    for alias in ["zipcode", "zip", "zip_code", "postalcode", "postal_code"]:
+        if alias in lower_cols and lower_cols[alias] != "ZipCode":
+            df = df.rename(columns={lower_cols[alias]: "ZipCode"})
+            break
     # If segment missing, derive from file name
     if "segment" not in df.columns:
         seg = Path(path).stem
