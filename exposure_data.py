@@ -574,63 +574,128 @@ def aggregate_traveling_unique_by_period(
 
     per_night = (tmp["tripCost"] / tmp["nightsCount"].replace(0, pd.NA)).fillna(0.0)
 
-    # More efficient approach: iterate through policies and assign to periods
+    # Most efficient approach: iterate through periods and find traveling policies
     records = []
     
-    for i in range(len(tmp)):
-        d0 = tmp.iloc[i]["dateDepart"]
-        d1 = tmp.iloc[i]["dateReturn"]
-        tcost = float(tmp.iloc[i]["tripCost"])
-        pn = float(per_night.iloc[i])
-        extras = [tmp.iloc[i][c] for c in extra_cols]
-        
-        if period == "week":
-            # Find all weeks this policy overlaps with
-            current = d0
-            while current <= d1:
-                # Get Monday of current week
-                week_start = current - pd.to_timedelta(current.weekday(), unit="D")
-                week_end = week_start + pd.to_timedelta(6, unit="D")
+    # Get date range from all policies
+    all_dates = pd.concat([tmp["dateDepart"], tmp["dateReturn"]]).dropna()
+    min_date = all_dates.min()
+    max_date = all_dates.max()
+    
+    if period == "week":
+        # Generate all ISO weeks in the range
+        current_week = min_date - pd.to_timedelta(min_date.weekday(), unit="D")  # Monday of first week
+        while current_week <= max_date:
+            week_end = current_week + pd.to_timedelta(6, unit="D")
+            
+            # Find policies traveling during this week
+            traveling_mask = (tmp["dateDepart"] <= week_end) & (tmp["dateReturn"] >= current_week)
+            traveling_policies = tmp[traveling_mask]
+            
+            if len(traveling_policies) > 0:
+                # Calculate normalized x-axis value
+                x_norm = pd.Timestamp(2000, 1, 3) + pd.to_timedelta((current_week.isocalendar().week - 1) * 7, unit="D")
+                year = current_week.year
                 
-                # Check if policy overlaps with this week
-                if d0 <= week_end and d1 >= week_start:
-                    # Calculate nights in this week
-                    start_in_week = max(d0, week_start)
-                    end_in_week = min(d1, week_end)
-                    nights_in_week = (end_in_week - start_in_week).days + 1
-                    
-                    x_norm = pd.Timestamp(2000, 1, 3) + pd.to_timedelta((week_start.isocalendar().week - 1) * 7, unit="D")
-                    year = week_start.year
-                    
-                    records.append([year, x_norm, 1, tcost, pn * nights_in_week] + extras)
-                
-                # Move to next week
-                current = week_end + pd.to_timedelta(1, unit="D")
-        else:  # month
-            # Find all months this policy overlaps with
-            current = d0.replace(day=1)
-            while current <= d1:
-                # Get month boundaries
-                if current.month == 12:
-                    next_month = current.replace(year=current.year + 1, month=1, day=1)
+                # For each group (if segment grouping), calculate metrics
+                if extra_cols:
+                    for group_vals, group_df in traveling_policies.groupby(extra_cols, dropna=False):
+                        if not isinstance(group_vals, tuple):
+                            group_vals = (group_vals,)
+                        
+                        # Calculate nights in this week for each policy
+                        nights_in_week = []
+                        for _, policy in group_df.iterrows():
+                            start_in_week = max(policy["dateDepart"], current_week)
+                            end_in_week = min(policy["dateReturn"], week_end)
+                            nights = (end_in_week - start_in_week).days + 1
+                            nights_in_week.append(nights)
+                        
+                        # Aggregate metrics for this group
+                        volume_unique = len(group_df)
+                        maxTripCostExposure_unique = group_df["tripCost"].sum()
+                        tripCostPerNightExposure_period = (group_df["tripCost"] / group_df["nightsCount"] * nights_in_week).sum()
+                        
+                        record = [year, x_norm, volume_unique, maxTripCostExposure_unique, tripCostPerNightExposure_period] + list(group_vals)
+                        records.append(record)
                 else:
-                    next_month = current.replace(month=current.month + 1, day=1)
-                month_end = next_month - pd.to_timedelta(1, unit="D")
-                
-                # Check if policy overlaps with this month
-                if d0 <= month_end and d1 >= current:
-                    # Calculate nights in this month
-                    start_in_month = max(d0, current)
-                    end_in_month = min(d1, month_end)
-                    nights_in_month = (end_in_month - start_in_month).days + 1
+                    # No grouping - aggregate all traveling policies
+                    nights_in_week = []
+                    for _, policy in traveling_policies.iterrows():
+                        start_in_week = max(policy["dateDepart"], current_week)
+                        end_in_week = min(policy["dateReturn"], week_end)
+                        nights = (end_in_week - start_in_week).days + 1
+                        nights_in_week.append(nights)
                     
-                    x_norm = pd.Timestamp(year=2000, month=current.month, day=1)
-                    year = current.year
+                    volume_unique = len(traveling_policies)
+                    maxTripCostExposure_unique = traveling_policies["tripCost"].sum()
+                    tripCostPerNightExposure_period = (traveling_policies["tripCost"] / traveling_policies["nightsCount"] * nights_in_week).sum()
                     
-                    records.append([year, x_norm, 1, tcost, pn * nights_in_month] + extras)
+                    record = [year, x_norm, volume_unique, maxTripCostExposure_unique, tripCostPerNightExposure_period]
+                    records.append(record)
+            
+            # Move to next week
+            current_week += pd.to_timedelta(7, unit="D")
+    
+    else:  # month
+        # Generate all months in the range
+        current_month = min_date.replace(day=1)
+        while current_month <= max_date:
+            # Calculate month end
+            if current_month.month == 12:
+                next_month = current_month.replace(year=current_month.year + 1, month=1, day=1)
+            else:
+                next_month = current_month.replace(month=current_month.month + 1, day=1)
+            month_end = next_month - pd.to_timedelta(1, unit="D")
+            
+            # Find policies traveling during this month
+            traveling_mask = (tmp["dateDepart"] <= month_end) & (tmp["dateReturn"] >= current_month)
+            traveling_policies = tmp[traveling_mask]
+            
+            if len(traveling_policies) > 0:
+                # Calculate normalized x-axis value
+                x_norm = pd.Timestamp(year=2000, month=current_month.month, day=1)
+                year = current_month.year
                 
-                # Move to next month
-                current = next_month
+                # For each group (if segment grouping), calculate metrics
+                if extra_cols:
+                    for group_vals, group_df in traveling_policies.groupby(extra_cols, dropna=False):
+                        if not isinstance(group_vals, tuple):
+                            group_vals = (group_vals,)
+                        
+                        # Calculate nights in this month for each policy
+                        nights_in_month = []
+                        for _, policy in group_df.iterrows():
+                            start_in_month = max(policy["dateDepart"], current_month)
+                            end_in_month = min(policy["dateReturn"], month_end)
+                            nights = (end_in_month - start_in_month).days + 1
+                            nights_in_month.append(nights)
+                        
+                        # Aggregate metrics for this group
+                        volume_unique = len(group_df)
+                        maxTripCostExposure_unique = group_df["tripCost"].sum()
+                        tripCostPerNightExposure_period = (group_df["tripCost"] / group_df["nightsCount"] * nights_in_month).sum()
+                        
+                        record = [year, x_norm, volume_unique, maxTripCostExposure_unique, tripCostPerNightExposure_period] + list(group_vals)
+                        records.append(record)
+                else:
+                    # No grouping - aggregate all traveling policies
+                    nights_in_month = []
+                    for _, policy in traveling_policies.iterrows():
+                        start_in_month = max(policy["dateDepart"], current_month)
+                        end_in_month = min(policy["dateReturn"], month_end)
+                        nights = (end_in_month - start_in_month).days + 1
+                        nights_in_month.append(nights)
+                    
+                    volume_unique = len(traveling_policies)
+                    maxTripCostExposure_unique = traveling_policies["tripCost"].sum()
+                    tripCostPerNightExposure_period = (traveling_policies["tripCost"] / traveling_policies["nightsCount"] * nights_in_month).sum()
+                    
+                    record = [year, x_norm, volume_unique, maxTripCostExposure_unique, tripCostPerNightExposure_period]
+                    records.append(record)
+            
+            # Move to next month
+            current_month = next_month
 
     if not records:
         cols = ["year", "x", "volume_unique", "maxTripCostExposure_unique", "tripCostPerNightExposure_period"] + extra_cols
@@ -639,15 +704,9 @@ def aggregate_traveling_unique_by_period(
     cols = ["year", "x", "volume_unique", "maxTripCostExposure_unique", "tripCostPerNightExposure_period"] + extra_cols
     df_rec = pd.DataFrame.from_records(records, columns=cols)
 
-    group_cols = ["year", "x"] + extra_cols
-    agg = df_rec.groupby(group_cols, as_index=False).agg(
-        volume_unique=("volume_unique", "sum"),
-        maxTripCostExposure_unique=("maxTripCostExposure_unique", "sum"),
-        tripCostPerNightExposure_period=("tripCostPerNightExposure_period", "sum"),
-    )
     sort_cols = ["x", "year"] + extra_cols
-    agg = agg.sort_values(sort_cols)
-    return agg
+    df_rec = df_rec.sort_values(sort_cols)
+    return df_rec
 
 
 # ---------- Precomputation helpers ----------
