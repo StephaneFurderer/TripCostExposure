@@ -22,6 +22,7 @@ def main() -> None:
     parser.add_argument("--rebuild-combined", action="store_true", help="Rebuild combined.parquet from CSVs")
     parser.add_argument("--erase-parquet", action="store_true", help="Erase combined.parquet before starting")
     parser.add_argument("--head", type=int, default=5, help="Number of rows to show from each aggregate")
+    parser.add_argument("--limit-rows", type=int, help="Limit data to N rows for testing (e.g., --limit-rows 1000)")
     args = parser.parse_args()
 
     folder = Path(args.folder).expanduser().resolve()
@@ -54,6 +55,14 @@ def main() -> None:
     else:
         print(f"- Loading existing {combined_path}")
         df_combined = pd.read_parquet(combined_path)
+
+    # Limit rows if specified
+    if args.limit_rows and len(df_combined) > args.limit_rows:
+        print(f"- Limiting data to {args.limit_rows} rows (from {len(df_combined)} total)")
+        df_combined = df_combined.head(args.limit_rows)
+        # Save the limited version back to parquet for consistent testing
+        df_combined.to_parquet(combined_path, index=False)
+        print(f"Saved limited combined.parquet with {len(df_combined)} policies")
 
     print(f"combined.parquet shape: {df_combined.shape}")
     print(df_combined.head(min(args.head, len(df_combined))))
