@@ -75,7 +75,10 @@ with st.sidebar:
                 st.success("Precompute complete")
                 st.dataframe(report)
 
-df = get_data(use_dummy_data, selected_folder, erase_cache)
+df = None
+if use_dummy_data:
+    # Only load data into memory for dummy mode
+    df = get_data(use_dummy_data, selected_folder, erase_cache)
 
 group_by_segment = st.checkbox("Group by Segment", value=False)
 # Default to week/all for fast initial load

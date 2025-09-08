@@ -300,15 +300,18 @@ def _normalize_period_x(dt: pd.Series, period: str) -> pd.Series:
 
 
 def compute_traveling_daily(
-    df: pd.DataFrame, start_date: Optional[pd.Timestamp] = None, end_date: Optional[pd.Timestamp] = None,
+    df: pd.DataFrame,
+    start_date: Optional[pd.Timestamp] = None,
+    end_date: Optional[pd.Timestamp] = None,
     additional_group_by: Optional[Union[str, List[str]]] = None,
 ) -> pd.DataFrame:
     """
-    Expand policies across traveling days and compute per-day metrics:
-      - volume: number of policies traveling
-      - maxTripCostExposure: sum of total tripCost of the traveling policies
-      - tripCostPerNightExposure: sum of (tripCost / nightsCount) across traveling policies
-    Returns columns: ["day", "year", "volume", "maxTripCostExposure", "tripCostPerNightExposure", ...extras]
+    Compute per-day traveling metrics WITHOUT exploding per-day rows using a sweep-line approach:
+      - volume: number of active policies per day
+      - maxTripCostExposure: sum of full tripCost across active policies
+      - tripCostPerNightExposure: sum of perNight across active policies
+
+    Returns columns: ["day", "year", metrics..., ...extras]
     """
     if additional_group_by is None:
         extra_cols: List[str] = []
@@ -321,33 +324,93 @@ def compute_traveling_daily(
     tmp["dateDepart"] = pd.to_datetime(tmp["dateDepart"]).dt.date
     tmp["dateReturn"] = pd.to_datetime(tmp["dateReturn"]).dt.date
 
-    # Default window bounds
+    # Window bounds
     overall_start = tmp["dateDepart"].min()
+    overall_end = tmp["dateReturn"].max()
     requested_start = pd.to_datetime(start_date).date() if start_date is not None else overall_start
-    requested_end = pd.to_datetime(end_date).date() if end_date is not None else tmp["dateReturn"].max()
+    requested_end = pd.to_datetime(end_date).date() if end_date is not None else overall_end
 
     # Clip to requested window
-    tmp["start"] = tmp["dateDepart"].mask(tmp["dateDepart"] < requested_start, requested_start)
-    tmp["end"] = tmp["dateReturn"].mask(tmp["dateReturn"] > requested_end, requested_end)
+    start = tmp["dateDepart"].where(tmp["dateDepart"] >= requested_start, requested_start)
+    end = tmp["dateReturn"].where(tmp["dateReturn"] <= requested_end, requested_end)
 
-    # Remove any with start > end after clipping
-    tmp = tmp[tmp["start"] <= tmp["end"]].copy()
+    # Remove invalid ranges after clipping
+    valid_mask = start <= end
+    tmp = tmp.loc[valid_mask].copy()
+    start = start.loc[valid_mask]
+    end = end.loc[valid_mask]
 
-    # Precompute per-night cost
-    tmp["perNight"] = tmp["tripCost"] / tmp["nightsCount"].replace(0, pd.NA)
-    tmp["perNight"] = tmp["perNight"].fillna(0.0)
+    # Per-night
+    per_night = (tmp["tripCost"] / tmp["nightsCount"].replace(0, pd.NA)).fillna(0.0)
 
-    # Build rows per day via explode
-    tmp["day"] = tmp.apply(lambda r: pd.date_range(r["start"], r["end"], freq="D"), axis=1)
-    exploded = tmp.explode("day")
-    exploded["day"] = exploded["day"].dt.date
+    # Build event deltas: + at start, - at end + 1 day
+    # Create DataFrame of events with minimal rows (2 per policy)
+    start_ts = pd.to_datetime(start)
+    end_plus1_ts = pd.to_datetime(end) + pd.to_timedelta(1, unit="D")
 
+    def build_events(sign: int, days: pd.Series) -> pd.DataFrame:
+        data = {
+            "day": days.values,
+            "volume": sign * 1,
+            "maxTripCostExposure": sign * tmp["tripCost"].values,
+            "tripCostPerNightExposure": sign * per_night.values,
+        }
+        events = pd.DataFrame(data)
+        for c in extra_cols:
+            events[c] = tmp[c].values
+        return events
+
+    ev_start = build_events(+1, start_ts)
+    ev_end = build_events(-1, end_plus1_ts)
+    events = pd.concat([ev_start, ev_end], ignore_index=True)
+
+    # Aggregate deltas per day (and segment if needed)
     group_cols = ["day"] + extra_cols
-    daily = exploded.groupby(group_cols, as_index=False).agg(
-        volume=("tripCost", "count"),
-        maxTripCostExposure=("tripCost", "sum"),
-        tripCostPerNightExposure=("perNight", "sum"),
-    )
+    deltas = events.groupby(group_cols, as_index=False).sum()
+    deltas = deltas.sort_values(group_cols)
+
+    # Cumulative sum over days per group
+    # We need a continuous date index over [requested_start, requested_end]
+    full_days = pd.date_range(requested_start, requested_end, freq="D")
+
+    if extra_cols:
+        # Build grid per group for reindexing
+        grids = []
+        for keys, grp in deltas.groupby(extra_cols, dropna=False):
+            if not isinstance(keys, tuple):
+                keys = (keys,)
+            idx = pd.Index(full_days, name="day")
+            g = grp.set_index("day").reindex(idx, fill_value=0)
+            # Add back extra cols as columns
+            for i, c in enumerate(extra_cols):
+                g[c] = keys[i]
+            g = g.reset_index().rename(columns={"index": "day"})
+            grids.append(g)
+        deltas_full = pd.concat(grids, ignore_index=True)
+        sort_cols = extra_cols + ["day"]
+        deltas_full = deltas_full.sort_values(sort_cols)
+        # cumulative sum within each group
+        daily = deltas_full.groupby(extra_cols, dropna=False).agg({
+            "day": "apply",
+            "volume": "cumsum",
+            "maxTripCostExposure": "cumsum",
+            "tripCostPerNightExposure": "cumsum",
+        })
+        # The aggregation above nests day; reconstruct frame
+        # Easier approach: perform cumsum via transform
+        deltas_full = deltas_full.sort_values(sort_cols)
+        for col in ["volume", "maxTripCostExposure", "tripCostPerNightExposure"]:
+            deltas_full[col] = deltas_full.groupby(extra_cols, dropna=False)[col].cumsum()
+        daily = deltas_full
+    else:
+        idx = pd.Index(full_days, name="day")
+        deltas_full = deltas.set_index("day").reindex(idx, fill_value=0).reset_index()
+        for col in ["volume", "maxTripCostExposure", "tripCostPerNightExposure"]:
+            deltas_full[col] = deltas_full[col].cumsum()
+        daily = deltas_full
+
+    # Finalize
+    daily["day"] = pd.to_datetime(daily["day"]).dt.date
     dt = pd.to_datetime(daily["day"])  # Timestamp
     daily["year"] = dt.dt.year.astype("int64")
     return daily[["day", "year", "volume", "maxTripCostExposure", "tripCostPerNightExposure"] + extra_cols]
