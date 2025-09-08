@@ -548,6 +548,7 @@ def aggregate_traveling_unique_by_period(
     df: pd.DataFrame,
     period: str,
     additional_group_by: Optional[Union[str, List[str]]] = None,
+    max_date: Optional[pd.Timestamp] = None,
 ) -> pd.DataFrame:
     """
     Unique-per-period traveling metrics (no daily summation):
@@ -556,6 +557,7 @@ def aggregate_traveling_unique_by_period(
       - tripCostPerNightExposure_period: sum perNight for nights whose start falls in the period
 
     period: 'week' or 'month'
+    max_date: Optional cutoff date (defaults to 3 weeks after today if None)
     """
     period = period.lower()
     if period not in {"week", "month"}:
@@ -577,15 +579,25 @@ def aggregate_traveling_unique_by_period(
     # Most efficient approach: iterate through periods and find traveling policies
     records = []
     
-    # Get date range from all policies
+    # Set default max_date to 3 weeks after today if not provided
+    if max_date is None:
+        max_date = pd.Timestamp.now() + pd.to_timedelta(21, unit="D")
+    
+    # Get date range from all policies, but limit to max_date
     all_dates = pd.concat([tmp["dateDepart"], tmp["dateReturn"]]).dropna()
     min_date = all_dates.min()
-    max_date = all_dates.max()
+    # Don't limit max_date here - we want to use the user-provided max_date as the cutoff
+    
+    print(f"Processing {period} aggregation from {min_date.date()} to {max_date.date()}")
     
     if period == "week":
-        # Generate all ISO weeks in the range
+        # Generate all ISO weeks in the range, but limit to max_date
         current_week = min_date - pd.to_timedelta(min_date.weekday(), unit="D")  # Monday of first week
+        week_count = 0
+        total_weeks = int((max_date - current_week).days / 7) + 1
+        
         while current_week <= max_date:
+            week_count += 1
             week_end = current_week + pd.to_timedelta(6, unit="D")
             
             # Find policies traveling during this week
@@ -634,13 +646,21 @@ def aggregate_traveling_unique_by_period(
                     record = [year, x_norm, volume_unique, maxTripCostExposure_unique, tripCostPerNightExposure_period]
                     records.append(record)
             
+            # Debug message every 10 weeks or at the end
+            if week_count % 10 == 0 or current_week + pd.to_timedelta(7, unit="D") > max_date:
+                print(f"  Processed week {week_count}/{total_weeks}: {current_week.date()} ({len(traveling_policies)} policies)")
+            
             # Move to next week
             current_week += pd.to_timedelta(7, unit="D")
     
     else:  # month
         # Generate all months in the range
         current_month = min_date.replace(day=1)
+        month_count = 0
+        total_months = (max_date.year - min_date.year) * 12 + (max_date.month - min_date.month) + 1
+        
         while current_month <= max_date:
+            month_count += 1
             # Calculate month end
             if current_month.month == 12:
                 next_month = current_month.replace(year=current_month.year + 1, month=1, day=1)
@@ -694,6 +714,10 @@ def aggregate_traveling_unique_by_period(
                     record = [year, x_norm, volume_unique, maxTripCostExposure_unique, tripCostPerNightExposure_period]
                     records.append(record)
             
+            # Debug message every 5 months or at the end
+            if month_count % 5 == 0 or next_month > max_date:
+                print(f"  Processed month {month_count}/{total_months}: {current_month.strftime('%Y-%m')} ({len(traveling_policies)} policies)")
+            
             # Move to next month
             current_month = next_month
 
@@ -706,6 +730,8 @@ def aggregate_traveling_unique_by_period(
 
     sort_cols = ["x", "year"] + extra_cols
     df_rec = df_rec.sort_values(sort_cols)
+    
+    print(f"Completed {period} aggregation: {len(df_rec)} records")
     return df_rec
 
 
