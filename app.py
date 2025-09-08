@@ -10,7 +10,6 @@ from exposure_data import (
     load_policies,
     normalize_policies_df,
     load_folder_policies,
-    load_precomputed_aggregate,
     precompute_all_with_timing,
     aggregate_daily_exposure_by_departure_year,
     aggregate_exposure_by_departure_period,
@@ -46,6 +45,16 @@ with st.sidebar:
         options=country_filter_options,
         default=country_filter_options,
         help="US: United States, ROW: Rest of World, null: Missing country data"
+    )
+    
+    # Region filter
+    st.header("Region Filter")
+    region_filter_options = ["Atlantic", "Florida", "Gulf", "Pacific", "Other"]
+    selected_regions = st.multiselect(
+        "Select regions to include",
+        options=region_filter_options,
+        default=region_filter_options,
+        help="Coastal regions: Atlantic (Maine to Georgia), Florida, Gulf (Texas to Alabama), Pacific (Hawaii + California), Other (non-coastal)"
     )
     selected_folder = None
     erase_cache = False
@@ -87,35 +96,107 @@ with st.sidebar:
                 st.success("All parquet files rebuilt.")
                 st.dataframe(report)
 
-df = None
-if use_dummy_data:
-    # Only load data into memory for dummy mode
-    df = get_data(use_dummy_data, selected_folder, erase_cache)
-
-# Apply country filter to both dummy and real data
-if df is not None and not df.empty:
-    # Create country filter mask
-    country_mask = pd.Series(False, index=df.index)
-    
-    if "US" in selected_countries:
-        country_mask |= (df['Country'] == 'US')
-    if "ROW" in selected_countries:
-        # ROW includes all countries that are not US and not null
-        country_mask |= ((df['Country'] != 'US') & (df['Country'].notna()))
-    if "null" in selected_countries:
-        country_mask |= df['Country'].isna()
-    
-    # Apply the filter
-    df = df[country_mask].copy()
-    
-    # Show filter summary
-    st.sidebar.caption(f"📊 Showing {len(df):,} policies after country filtering")
-
+# UI Controls (needed before data loading)
 group_by_segment = st.checkbox("Group by Segment", value=False)
 # Default to week/all for fast initial load
 period = st.selectbox("Time grain", options=["day", "week", "month"], index=1)
 metric_mode = st.radio("Metric base", options=["Departures", "Traveling"], index=0, horizontal=True)
 year_order_choice = st.selectbox("Departure Year order", options=["Ascending", "Descending"], index=0)
+
+# Try to load precomputed aggregates first (for real data)
+precomputed_data = None
+if not use_dummy_data and selected_folder:
+    # Try to load precomputed aggregates
+    from pathlib import Path
+    folder_path = Path(selected_folder)
+    
+    # Map to aggregate file names
+    if metric_mode == "Traveling":
+        if period == "day":
+            agg_file = folder_path / "agg_travel_day_all.parquet"
+        else:
+            agg_file = folder_path / f"agg_travel_{period}_all.parquet"
+    else:
+        agg_file = folder_path / f"agg_depart_{period}_all.parquet"
+    
+    if group_by_segment:
+        # Try segment version
+        if metric_mode == "Traveling":
+            if period == "day":
+                agg_file = folder_path / "agg_travel_day_by_segment.parquet"
+            else:
+                agg_file = folder_path / f"agg_travel_{period}_by_segment.parquet"
+        else:
+            agg_file = folder_path / f"agg_depart_{period}_by_segment.parquet"
+    
+    # Load precomputed data if available
+    if agg_file.exists():
+        precomputed_data = pd.read_parquet(agg_file)
+        st.sidebar.success(f"✅ Loaded precomputed {period} {metric_mode.lower()} data")
+    else:
+        st.sidebar.warning(f"⚠️ Precomputed {period} {metric_mode.lower()} data not found, will compute from raw data")
+
+# Fallback to raw data if no precomputed data available
+df = None
+if precomputed_data is None:
+    if use_dummy_data:
+        # Load dummy data
+        df = get_data(use_dummy_data, selected_folder, erase_cache)
+    else:
+        # Load real data from combined.parquet
+        if selected_folder:
+            combined_path = os.path.join(selected_folder, "combined.parquet")
+            if os.path.exists(combined_path):
+                df = pd.read_parquet(combined_path)
+                # Ensure datetime types
+                for c in ["dateDepart", "dateReturn", "dateApp"]:
+                    if c in df.columns:
+                        df[c] = pd.to_datetime(df[c], errors="coerce")
+    
+    # Apply country filter to raw data only if we're using raw data
+    if df is not None and not df.empty:
+        # Create country filter mask
+        country_mask = pd.Series(False, index=df.index)
+        
+        if "US" in selected_countries:
+            country_mask |= (df['Country'] == 'US')
+        if "ROW" in selected_countries:
+            # ROW includes all countries that are not US and not null
+            country_mask |= ((df['Country'] != 'US') & (df['Country'].notna()))
+        if "null" in selected_countries:
+            country_mask |= df['Country'].isna()
+        
+        # Apply the filter
+        df = df[country_mask].copy()
+        
+        # Show filter summary
+        st.sidebar.caption(f"📊 Showing {len(df):,} policies after country filtering")
+
+def filter_aggregate_data(data, selected_countries, selected_regions):
+    """Filter aggregate data based on country and region selections"""
+    if data is None or data.empty:
+        return data
+    
+    # Apply country filter
+    country_mask = pd.Series(False, index=data.index)
+    if "US" in selected_countries:
+        country_mask |= (data['country_class'] == 'US')
+    if "ROW" in selected_countries:
+        country_mask |= (data['country_class'] == 'ROW')
+    if "null" in selected_countries:
+        country_mask |= (data['country_class'] == 'null')
+    
+    # Apply region filter
+    region_mask = pd.Series(False, index=data.index)
+    for region in selected_regions:
+        region_mask |= (data['region_class'] == region)
+    
+    # Combine filters
+    combined_mask = country_mask & region_mask
+    filtered_data = data[combined_mask].copy()
+    
+    return filtered_data
+
 # Unified metric selector based on mode
 if metric_mode == "Traveling":
     metric_options = ["volume", "maxTripCostExposure", "tripCostPerNightExposure"]
@@ -127,93 +208,172 @@ selected_metric = st.selectbox("Metric to plot", options=metric_options, index=d
 
 # Main display panel
 ## plot the trip cost exposure by departure year per day, week or month
-if group_by_segment:
+
+# Use precomputed data if available, otherwise compute from raw data
+if precomputed_data is not None:
+    # Use precomputed data and apply filters
+    filtered_data = filter_aggregate_data(precomputed_data, selected_countries, selected_regions)
+    
+    # Show filter summary
+    if not filtered_data.empty:
+        st.sidebar.caption(f"📈 Showing {len(filtered_data):,} records after filtering")
+    
+    # Handle segment filtering if needed
+    if group_by_segment and "segment" in filtered_data.columns:
+        segments = sorted(filtered_data["segment"].dropna().astype(str).unique().tolist())
+        selected_segments = st.multiselect("Select segments", segments, default=segments)
+        filtered_data = filtered_data[filtered_data["segment"].astype(str).isin(selected_segments)]
+    
+    # Aggregate the filtered data by year and x (time period)
+    # Group by year, x, and segment (if present)
+    # Note: We don't include country_class and region_class in groupby because
+    # we want to aggregate across all selected countries/regions
+    group_cols = ["year", "x"]
+    if group_by_segment and "segment" in filtered_data.columns:
+        group_cols.append("segment")
+    
+    # Aggregate metrics
+    agg_dict = {}
+    if "volume" in filtered_data.columns:
+        agg_dict["volume"] = "sum"
+    if "maxTripCostExposure" in filtered_data.columns:
+        agg_dict["maxTripCostExposure"] = "sum"
+    if "tripCostPerNightExposure" in filtered_data.columns:
+        agg_dict["tripCostPerNightExposure"] = "sum"
+    if "avgTripCostPerNight" in filtered_data.columns:
+        agg_dict["avgTripCostPerNight"] = "mean"
+    
+    data = filtered_data.groupby(group_cols, as_index=False).agg(agg_dict)
+    
+    years = sorted(data["year"].unique().tolist())
+    if year_order_choice == "Descending":
+        years = list(reversed(years))
+    data["year"] = pd.Categorical(data["year"], categories=years, ordered=True)
+    
+elif group_by_segment:
+    # Fallback to raw data computation
     segments = sorted(df["segment"].dropna().astype(str).unique().tolist())
     selected_segments = st.multiselect("Select segments", segments, default=segments)
     df_use = df[df["segment"].astype(str).isin(selected_segments)]
     if metric_mode == "Traveling":
-        pre = load_precomputed_aggregate(selected_folder, kind="travel", period=period, by_segment=True)
-        if pre is not None:
-            data = pre
+        # Always use filtered raw data for aggregates to respect country filtering
+        if period == "day":
+            data = aggregate_traveling_by_period(df_use, period=period, additional_group_by="segment")
         else:
-            if period == "day":
-                data = aggregate_traveling_by_period(df_use, period=period, additional_group_by="segment")
-            else:
-                data = aggregate_traveling_unique_by_period(df_use, period=period, additional_group_by="segment", folder_path=selected_folder)
+            data = aggregate_traveling_unique_by_period(df_use, period=period, additional_group_by="segment", folder_path=selected_folder)
+        
+        # Apply country and region filters to aggregate data
+        data = filter_aggregate_data(data, selected_countries, selected_regions)
+        
         years = sorted(data["year"].unique().tolist())
         if year_order_choice == "Descending":
             years = list(reversed(years))
         data["year"] = pd.Categorical(data["year"], categories=years, ordered=True)
-        ycol = selected_metric
-        fig = px.line(
-            data,
-            x="x",
-            y=ycol,
-            color="year",
-            facet_row="segment",
-            color_discrete_sequence=px.colors.qualitative.Safe,
-            category_orders={"year": years},
-            labels={"x": f"{period.title()} (normalized)", ycol: ycol, "year": "Year", "segment": "Segment"},
-        )
     else:
-        pre = load_precomputed_aggregate(selected_folder, kind="depart", period=period, by_segment=True)
-        data = pre if pre is not None else aggregate_departures_by_period(df_use, period=period, additional_group_by="segment")
+        # Fallback to raw data computation for departures
+        data = aggregate_departures_by_period(df_use, period=period, additional_group_by="segment")
+        
+        # Apply country and region filters to aggregate data
+        data = filter_aggregate_data(data, selected_countries, selected_regions)
+        
         years = sorted(data["year"].unique().tolist())
         if year_order_choice == "Descending":
             years = list(reversed(years))
         data["year"] = pd.Categorical(data["year"], categories=years, ordered=True)
-        ycol = selected_metric
-        fig = px.line(
-            data,
-            x="x",
-            y=ycol,
-            color="year",
-            facet_row="segment",
-            color_discrete_sequence=px.colors.qualitative.Safe,
-            category_orders={"year": years},
-            labels={"x": f"Departure {period.title()}", ycol: ycol, "year": "Year", "segment": "Segment"},
-        )
+
 else:
-    if metric_mode == "Traveling":
-        pre = load_precomputed_aggregate(selected_folder, kind="travel", period=period, by_segment=False) if not use_dummy_data else None
-        if pre is not None:
-            data = pre
-        else:
+    # Non-segmented case
+    if precomputed_data is not None:
+        # Use precomputed data and apply filters
+        filtered_data = filter_aggregate_data(precomputed_data, selected_countries, selected_regions)
+        
+        # Show filter summary
+        if not filtered_data.empty:
+            st.sidebar.caption(f"📈 Showing {len(filtered_data):,} records after filtering")
+        
+        # Aggregate the filtered data by year and x (time period)
+        # Group by year and x only (no segment, no country_class, no region_class)
+        group_cols = ["year", "x"]
+        
+        # Aggregate metrics
+        agg_dict = {}
+        if "volume" in filtered_data.columns:
+            agg_dict["volume"] = "sum"
+        if "maxTripCostExposure" in filtered_data.columns:
+            agg_dict["maxTripCostExposure"] = "sum"
+        if "tripCostPerNightExposure" in filtered_data.columns:
+            agg_dict["tripCostPerNightExposure"] = "sum"
+        if "avgTripCostPerNight" in filtered_data.columns:
+            agg_dict["avgTripCostPerNight"] = "mean"
+        
+        data = filtered_data.groupby(group_cols, as_index=False).agg(agg_dict)
+        
+        years = sorted(data["year"].unique().tolist())
+        if year_order_choice == "Descending":
+            years = list(reversed(years))
+        data["year"] = pd.Categorical(data["year"], categories=years, ordered=True)
+    else:
+        # Fallback to raw data computation
+        if metric_mode == "Traveling":
             if period == "day":
                 data = aggregate_traveling_by_period(df, period=period)
             else:
                 data = aggregate_traveling_unique_by_period(df, period=period, folder_path=selected_folder)
+        else:
+            data = aggregate_departures_by_period(df, period=period)
+        
+        # Apply country and region filters to aggregate data
+        filtered_data = filter_aggregate_data(data, selected_countries, selected_regions)
+        
+        # Show filter summary
+        if not filtered_data.empty:
+            st.sidebar.caption(f"📈 Showing {len(filtered_data):,} records after filtering")
+        
+        # Aggregate the filtered data by year and x (time period)
+        # Group by year and x only (no segment, no country_class, no region_class)
+        group_cols = ["year", "x"]
+        
+        # Aggregate metrics
+        agg_dict = {}
+        if "volume" in filtered_data.columns:
+            agg_dict["volume"] = "sum"
+        if "maxTripCostExposure" in filtered_data.columns:
+            agg_dict["maxTripCostExposure"] = "sum"
+        if "tripCostPerNightExposure" in filtered_data.columns:
+            agg_dict["tripCostPerNightExposure"] = "sum"
+        if "avgTripCostPerNight" in filtered_data.columns:
+            agg_dict["avgTripCostPerNight"] = "mean"
+        
+        data = filtered_data.groupby(group_cols, as_index=False).agg(agg_dict)
+        
         years = sorted(data["year"].unique().tolist())
         if year_order_choice == "Descending":
             years = list(reversed(years))
         data["year"] = pd.Categorical(data["year"], categories=years, ordered=True)
-        ycol = selected_metric
-        fig = px.line(
-            data,
-            x="x",
-            y=ycol,
-            color="year",
-            color_discrete_sequence=px.colors.qualitative.Safe,
-            category_orders={"year": years},
-            labels={"x": f"{period.title()} (normalized)", ycol: ycol, "year": "Year"},
-        )
-    else:
-        pre = load_precomputed_aggregate(selected_folder, kind="depart", period=period, by_segment=False) if not use_dummy_data else None
-        data = pre if pre is not None else aggregate_departures_by_period(df, period=period)
-        years = sorted(data["year"].unique().tolist())
-        if year_order_choice == "Descending":
-            years = list(reversed(years))
-        data["year"] = pd.Categorical(data["year"], categories=years, ordered=True)
-        ycol = selected_metric
-        fig = px.line(
-            data,
-            x="x",
-            y=ycol,
-            color="year",
-            color_discrete_sequence=px.colors.qualitative.Safe,
-            category_orders={"year": years},
-            labels={"x": f"Departure {period.title()}", ycol: ycol, "year": "Year"},
-        )
+
+# Create the plot
+ycol = selected_metric
+if group_by_segment and "segment" in data.columns:
+    fig = px.line(
+        data,
+        x="x",
+        y=ycol,
+        color="year",
+        facet_row="segment",
+        color_discrete_sequence=px.colors.qualitative.Safe,
+        category_orders={"year": years},
+        labels={"x": f"{period.title()} (normalized)" if metric_mode == "Traveling" else f"Departure {period.title()}", ycol: ycol, "year": "Year", "segment": "Segment"},
+    )
+else:
+    fig = px.line(
+        data,
+        x="x",
+        y=ycol,
+        color="year",
+        color_discrete_sequence=px.colors.qualitative.Safe,
+        category_orders={"year": years},
+        labels={"x": f"{period.title()} (normalized)" if metric_mode == "Traveling" else f"Departure {period.title()}", ycol: ycol, "year": "Year"},
+    )
 
 # Configure x-axis ticks per selected period
 if period == "day":

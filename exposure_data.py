@@ -13,6 +13,127 @@ import time
 DEFAULT_CSV_PATH = os.path.join(os.path.dirname(__file__), "_data", "policies.csv")
 
 
+def classify_country(country_value) -> str:
+    """
+    Classify country values into US, ROW, or null categories.
+    """
+    if pd.isna(country_value) or country_value is None:
+        return "null"
+    elif str(country_value).upper() == "US":
+        return "US"
+    else:
+        return "ROW"
+
+
+def classify_region(zip_code: str) -> str:
+    """
+    Classify ZIP codes into coastal regions based on US Census Bureau data.
+    Returns: 'Atlantic', 'Florida', 'Gulf', 'Pacific', or 'Other'
+    """
+    if pd.isna(zip_code) or zip_code is None:
+        return "Other"
+    
+    zip_str = str(zip_code).strip()
+    if len(zip_str) < 5:
+        return "Other"
+    
+    # Extract first 3 digits for region classification
+    zip_prefix = zip_str[:3]
+    
+    # Atlantic Coast (without Florida) - Maine to Georgia
+    atlantic_prefixes = [
+        # Maine (040-049)
+        "040", "041", "042", "043", "044", "045", "046", "047", "048", "049",
+        # New Hampshire (030-039)
+        "030", "031", "032", "033", "034", "035", "036", "037", "038", "039",
+        # Massachusetts (010-027)
+        "010", "011", "012", "013", "014", "015", "016", "017", "018", "019",
+        "020", "021", "022", "023", "024", "025", "026", "027",
+        # Rhode Island (028-029)
+        "028", "029",
+        # Connecticut (060-069)
+        "060", "061", "062", "063", "064", "065", "066", "067", "068", "069",
+        # New York (100-149)
+        "100", "101", "102", "103", "104", "105", "106", "107", "108", "109",
+        "110", "111", "112", "113", "114", "115", "116", "117", "118", "119",
+        "120", "121", "122", "123", "124", "125", "126", "127", "128", "129",
+        "130", "131", "132", "133", "134", "135", "136", "137", "138", "139",
+        "140", "141", "142", "143", "144", "145", "146", "147", "148", "149",
+        # New Jersey (070-089)
+        "070", "071", "072", "073", "074", "075", "076", "077", "078", "079",
+        "080", "081", "082", "083", "084", "085", "086", "087", "088", "089",
+        # Pennsylvania (150-196) - only coastal areas
+        "150", "151", "152", "153", "154", "155", "156", "157", "158", "159",
+        "160", "161", "162", "163", "164", "165", "166", "167", "168", "169",
+        "170", "171", "172", "173", "174", "175", "176", "177", "178", "179",
+        "180", "181", "182", "183", "184", "185", "186", "187", "188", "189",
+        "190", "191", "192", "193", "194", "195", "196",
+        # Delaware (197-199)
+        "197", "198", "199",
+        # Maryland (206-219)
+        "206", "207", "208", "209", "210", "211", "212", "213", "214", "215",
+        "216", "217", "218", "219",
+        # Virginia (220-246) - coastal areas
+        "220", "221", "222", "223", "224", "225", "226", "227", "228", "229",
+        "230", "231", "232", "233", "234", "235", "236", "237", "238", "239",
+        "240", "241", "242", "243", "244", "245", "246",
+        # North Carolina (270-289) - coastal areas
+        "270", "271", "272", "273", "274", "275", "276", "277", "278", "279",
+        "280", "281", "282", "283", "284", "285", "286", "287", "288", "289",
+        # South Carolina (290-299) - coastal areas
+        "290", "291", "292", "293", "294", "295", "296", "297", "298", "299",
+        # Georgia (300-319) - coastal areas
+        "300", "301", "302", "303", "304", "305", "306", "307", "308", "309",
+        "310", "311", "312", "313", "314", "315", "316", "317", "318", "319"
+    ]
+    
+    # Florida - all Florida ZIP codes
+    florida_prefixes = [
+        "320", "321", "322", "323", "324", "325", "326", "327", "328", "329",
+        "330", "331", "332", "333", "334", "335", "336", "337", "338", "339",
+        "340", "341", "342", "343", "344", "345", "346", "347", "348", "349"
+    ]
+    
+    # Gulf of Mexico (without Florida) - Texas, Louisiana, Mississippi, Alabama
+    gulf_prefixes = [
+        # Texas (770-799) - Gulf Coast areas
+        "770", "771", "772", "773", "774", "775", "776", "777", "778", "779",
+        "780", "781", "782", "783", "784", "785", "786", "787", "788", "789",
+        "790", "791", "792", "793", "794", "795", "796", "797", "798", "799",
+        # Louisiana (700-714)
+        "700", "701", "702", "703", "704", "705", "706", "707", "708", "709",
+        "710", "711", "712", "713", "714",
+        # Mississippi (390-397)
+        "390", "391", "392", "393", "394", "395", "396", "397",
+        # Alabama (350-369) - Gulf Coast areas
+        "350", "351", "352", "353", "354", "355", "356", "357", "358", "359",
+        "360", "361", "362", "363", "364", "365", "366", "367", "368", "369"
+    ]
+    
+    # Pacific Coast - Hawaii + California south of San Diego
+    pacific_prefixes = [
+        # Hawaii (967-968)
+        "967", "968",
+        # California (900-949) - Southern California coastal areas
+        "900", "901", "902", "903", "904", "905", "906", "907", "908", "909",
+        "910", "911", "912", "913", "914", "915", "916", "917", "918", "919",
+        "920", "921", "922", "923", "924", "925", "926", "927", "928", "929",
+        "930", "931", "932", "933", "934", "935", "936", "937", "938", "939",
+        "940", "941", "942", "943", "944", "945", "946", "947", "948", "949"
+    ]
+    
+    if zip_prefix in atlantic_prefixes:
+        return "Atlantic"
+    elif zip_prefix in florida_prefixes:
+        return "Florida"
+    elif zip_prefix in gulf_prefixes:
+        return "Gulf"
+    elif zip_prefix in pacific_prefixes:
+        return "Pacific"
+    else:
+        return "Other"
+
+
 @dataclass
 class ExposureDataConfig:
     csv_path: str = DEFAULT_CSV_PATH
@@ -320,9 +441,27 @@ def compute_traveling_daily(
     else:
         extra_cols = list(additional_group_by)
 
-    tmp = df[["dateDepart", "dateReturn", "tripCost", "nightsCount"] + extra_cols].copy()
+    # Include country and region classification
+    base_cols = ["dateDepart", "dateReturn", "tripCost", "nightsCount"]
+    if "Country" in df.columns:
+        base_cols.append("Country")
+    if "ZipCode" in df.columns:
+        base_cols.append("ZipCode")
+    
+    tmp = df[base_cols + extra_cols].copy()
     tmp["dateDepart"] = pd.to_datetime(tmp["dateDepart"]).dt.date
     tmp["dateReturn"] = pd.to_datetime(tmp["dateReturn"]).dt.date
+    
+    # Add country and region classification
+    if "Country" in tmp.columns:
+        tmp["country_class"] = tmp["Country"].apply(classify_country)
+    else:
+        tmp["country_class"] = "null"
+    
+    if "ZipCode" in tmp.columns:
+        tmp["region_class"] = tmp["ZipCode"].apply(classify_region)
+    else:
+        tmp["region_class"] = "Other"
 
     # Window bounds
     overall_start = tmp["dateDepart"].min()
@@ -354,6 +493,8 @@ def compute_traveling_daily(
             "volume": sign * 1,
             "maxTripCostExposure": sign * tmp["tripCost"].values,
             "tripCostPerNightExposure": sign * per_night.values,
+            "country_class": tmp["country_class"].values,
+            "region_class": tmp["region_class"].values,
         }
         events = pd.DataFrame(data)
         for c in extra_cols:
@@ -365,7 +506,8 @@ def compute_traveling_daily(
     events = pd.concat([ev_start, ev_end], ignore_index=True)
 
     # Aggregate deltas per day (and segment if needed)
-    group_cols = ["day"] + extra_cols
+    # Always include country and region classifications in grouping
+    group_cols = ["day", "country_class", "region_class"] + extra_cols
     deltas = events.groupby(group_cols, as_index=False).sum()
     deltas = deltas.sort_values(group_cols)
 
@@ -373,12 +515,14 @@ def compute_traveling_daily(
     # We need a continuous date index over [requested_start, requested_end]
     full_days = pd.date_range(requested_start, requested_end, freq="D")
 
-    if extra_cols:
+    if extra_cols or True:  # Always use grouping since we have country_class and region_class
         # Build grid per group for reindexing
         grids = []
+        # Group by country_class, region_class, and extra_cols
+        groupby_cols = ["country_class", "region_class"] + extra_cols
         # Handle single column case to avoid pandas warning
-        groupby_cols = extra_cols[0] if len(extra_cols) == 1 else extra_cols
-        for keys, grp in deltas.groupby(groupby_cols, dropna=False):
+        groupby_cols_single = groupby_cols[0] if len(groupby_cols) == 1 else groupby_cols
+        for keys, grp in deltas.groupby(groupby_cols_single, dropna=False):
             if not isinstance(keys, tuple):
                 keys = (keys,)
             idx = pd.Index(full_days, name="day")
@@ -386,20 +530,20 @@ def compute_traveling_daily(
             metric_cols = ["volume", "maxTripCostExposure", "tripCostPerNightExposure"]
             grp_metrics = grp[["day"] + metric_cols]
             g = grp_metrics.set_index("day").reindex(idx, fill_value=0)
-            # Add back extra cols as columns
-            for i, c in enumerate(extra_cols):
+            # Add back grouping columns as columns
+            for i, c in enumerate(groupby_cols):
                 g[c] = keys[i]
             g = g.reset_index().rename(columns={"index": "day"})
             grids.append(g)
         deltas_full = pd.concat(grids, ignore_index=True)
-        sort_cols = extra_cols + ["day"]
+        sort_cols = groupby_cols + ["day"]
         deltas_full = deltas_full.sort_values(sort_cols)
         # Perform cumulative sums via group-wise transform
         deltas_full = deltas_full.sort_values(sort_cols)
         for col in ["volume", "maxTripCostExposure", "tripCostPerNightExposure"]:
                 # Handle single column case to avoid pandas warning
-                groupby_cols = extra_cols[0] if len(extra_cols) == 1 else extra_cols
-                deltas_full[col] = deltas_full.groupby(groupby_cols, dropna=False)[col].cumsum()
+                groupby_cols_cumsum = groupby_cols[0] if len(groupby_cols) == 1 else groupby_cols
+                deltas_full[col] = deltas_full.groupby(groupby_cols_cumsum, dropna=False)[col].cumsum()
         daily = deltas_full
     else:
         idx = pd.Index(full_days, name="day")
@@ -412,7 +556,7 @@ def compute_traveling_daily(
     daily["day"] = pd.to_datetime(daily["day"]).dt.date
     dt = pd.to_datetime(daily["day"])  # Timestamp
     daily["year"] = dt.dt.year.astype("int64")
-    return daily[["day", "year", "volume", "maxTripCostExposure", "tripCostPerNightExposure"] + extra_cols]
+    return daily[["day", "year", "country_class", "region_class", "volume", "maxTripCostExposure", "tripCostPerNightExposure"] + extra_cols]
 
 
 def aggregate_traveling_by_period(
@@ -441,15 +585,16 @@ def aggregate_traveling_by_period(
     dt = pd.to_datetime(daily["day"])
     daily["x"] = _normalize_period_x(dt, period)
 
-    group_cols = ["year", "x"] + extra_cols
+    # Always include country and region classifications in grouping
+    group_cols = ["year", "x", "country_class", "region_class"] + extra_cols
     agg = daily.groupby(group_cols, as_index=False).agg(
         volume=("volume", "sum"),
         maxTripCostExposure=("maxTripCostExposure", "sum"),
         tripCostPerNightExposure=("tripCostPerNightExposure", "sum"),
     )
-    sort_cols = ["x", "year"] + extra_cols
+    sort_cols = ["x", "year", "country_class", "region_class"] + extra_cols
     agg = agg.sort_values(sort_cols)
-    return agg[["year", "x", "volume", "maxTripCostExposure", "tripCostPerNightExposure"] + extra_cols]
+    return agg[["year", "x", "country_class", "region_class", "volume", "maxTripCostExposure", "tripCostPerNightExposure"] + extra_cols]
 
 
 def compute_departures_daily(
@@ -469,12 +614,30 @@ def compute_departures_daily(
     else:
         extra_cols = list(additional_group_by)
 
-    tmp = df[["dateDepart", "tripCost", "nightsCount"] + extra_cols].copy()
+    # Include country and region classification
+    base_cols = ["dateDepart", "tripCost", "nightsCount"]
+    if "Country" in df.columns:
+        base_cols.append("Country")
+    if "ZipCode" in df.columns:
+        base_cols.append("ZipCode")
+    
+    tmp = df[base_cols + extra_cols].copy()
     tmp["day"] = pd.to_datetime(tmp["dateDepart"]).dt.date
     tmp["perNight"] = tmp["tripCost"] / tmp["nightsCount"].replace(0, pd.NA)
     tmp["perNight"] = tmp["perNight"].fillna(0.0)
+    
+    # Add country and region classification
+    if "Country" in tmp.columns:
+        tmp["country_class"] = tmp["Country"].apply(classify_country)
+    else:
+        tmp["country_class"] = "null"
+    
+    if "ZipCode" in tmp.columns:
+        tmp["region_class"] = tmp["ZipCode"].apply(classify_region)
+    else:
+        tmp["region_class"] = "Other"
 
-    group_cols = ["day"] + extra_cols
+    group_cols = ["day", "country_class", "region_class"] + extra_cols
     daily = tmp.groupby(group_cols, as_index=False).agg(
         volume=("tripCost", "count"),
         maxTripCostExposure=("tripCost", "sum"),
@@ -482,7 +645,7 @@ def compute_departures_daily(
     )
     dt = pd.to_datetime(daily["day"])  # Timestamp
     daily["year"] = dt.dt.year.astype("int64")
-    return daily[["day", "year", "volume", "maxTripCostExposure", "avgTripCostPerNight"] + extra_cols]
+    return daily[["day", "year", "country_class", "region_class", "volume", "maxTripCostExposure", "avgTripCostPerNight"] + extra_cols]
 
 
 def aggregate_departures_by_period(
@@ -507,15 +670,16 @@ def aggregate_departures_by_period(
     dt = pd.to_datetime(daily["day"])
     daily["x"] = _normalize_period_x(dt, period)
 
-    group_cols = ["year", "x"] + extra_cols
+    # Always include country and region classifications in grouping
+    group_cols = ["year", "x", "country_class", "region_class"] + extra_cols
     agg = daily.groupby(group_cols, as_index=False).agg(
         volume=("volume", "sum"),
         maxTripCostExposure=("maxTripCostExposure", "sum"),
         avgTripCostPerNight=("avgTripCostPerNight", "mean"),
     )
-    sort_cols = ["x", "year"] + extra_cols
+    sort_cols = ["x", "year", "country_class", "region_class"] + extra_cols
     agg = agg.sort_values(sort_cols)
-    return agg[["year", "x", "volume", "maxTripCostExposure", "avgTripCostPerNight"] + extra_cols]
+    return agg[["year", "x", "country_class", "region_class", "volume", "maxTripCostExposure", "avgTripCostPerNight"] + extra_cols]
 
 
 # ---------- Unique-per-period traveling aggregation ----------
@@ -575,9 +739,27 @@ def aggregate_traveling_unique_by_period(
     else:
         extra_cols = list(additional_group_by)
 
-    tmp = df[["dateDepart", "dateReturn", "tripCost", "nightsCount"] + extra_cols].copy()
+    # Include country and region classification
+    base_cols = ["dateDepart", "dateReturn", "tripCost", "nightsCount"]
+    if "Country" in df.columns:
+        base_cols.append("Country")
+    if "ZipCode" in df.columns:
+        base_cols.append("ZipCode")
+    
+    tmp = df[base_cols + extra_cols].copy()
     tmp["dateDepart"] = pd.to_datetime(tmp["dateDepart"]).dt.normalize()
     tmp["dateReturn"] = pd.to_datetime(tmp["dateReturn"]).dt.normalize()
+    
+    # Add country and region classification
+    if "Country" in tmp.columns:
+        tmp["country_class"] = tmp["Country"].apply(classify_country)
+    else:
+        tmp["country_class"] = "null"
+    
+    if "ZipCode" in tmp.columns:
+        tmp["region_class"] = tmp["ZipCode"].apply(classify_region)
+    else:
+        tmp["region_class"] = "Other"
 
     per_night = (tmp["tripCost"] / tmp["nightsCount"].replace(0, pd.NA)).fillna(0.0)
 
@@ -647,43 +829,32 @@ def aggregate_traveling_unique_by_period(
                 x_norm = pd.Timestamp(2000, 1, 3) + pd.to_timedelta((current_week.isocalendar().week - 1) * 7, unit="D")
                 year = current_week.year
                 
-                # For each group (if segment grouping), calculate metrics
-                if extra_cols:
-                    # Handle single column case to avoid pandas warning
-                    groupby_cols = extra_cols[0] if len(extra_cols) == 1 else extra_cols
-                    for group_vals, group_df in traveling_policies.groupby(groupby_cols, dropna=False):
-                        if not isinstance(group_vals, tuple):
-                            group_vals = (group_vals,)
-                        
-                        # Calculate nights in this week for each policy
-                        nights_in_week = []
-                        for _, policy in group_df.iterrows():
-                            start_in_week = max(policy["dateDepart"], current_week)
-                            end_in_week = min(policy["dateReturn"], week_end)
-                            nights = (end_in_week - start_in_week).days + 1
-                            nights_in_week.append(nights)
-                        
-                        # Aggregate metrics for this group
-                        volume = len(group_df)
-                        maxTripCostExposure = group_df["tripCost"].sum()
-                        tripCostPerNightExposure = (group_df["tripCost"] / group_df["nightsCount"] * nights_in_week).sum()
-                        
-                        record = [year, x_norm, volume, maxTripCostExposure, tripCostPerNightExposure] + list(group_vals)
-                        records.append(record)
-                else:
-                    # No grouping - aggregate all traveling policies
+                # Always group by country_class and region_class, plus any extra_cols
+                groupby_cols = ["country_class", "region_class"] + extra_cols
+                # Handle single column case to avoid pandas warning
+                groupby_cols_single = groupby_cols[0] if len(groupby_cols) == 1 else groupby_cols
+                for group_vals, group_df in traveling_policies.groupby(groupby_cols_single, dropna=False):
+                    if not isinstance(group_vals, tuple):
+                        group_vals = (group_vals,)
+                    
+                    # Calculate nights in this week for each policy
                     nights_in_week = []
-                    for _, policy in traveling_policies.iterrows():
+                    for _, policy in group_df.iterrows():
                         start_in_week = max(policy["dateDepart"], current_week)
                         end_in_week = min(policy["dateReturn"], week_end)
                         nights = (end_in_week - start_in_week).days + 1
                         nights_in_week.append(nights)
                     
-                    volume = len(traveling_policies)
-                    maxTripCostExposure = traveling_policies["tripCost"].sum()
-                    tripCostPerNightExposure = (traveling_policies["tripCost"] / traveling_policies["nightsCount"] * nights_in_week).sum()
+                    # Aggregate metrics for this group
+                    volume = len(group_df)
+                    maxTripCostExposure = group_df["tripCost"].sum()
+                    tripCostPerNightExposure = (group_df["tripCost"] / group_df["nightsCount"] * nights_in_week).sum()
                     
-                    record = [year, x_norm, volume, maxTripCostExposure, tripCostPerNightExposure]
+                    # Extract country_class and region_class from group_vals
+                    country_class = group_vals[0] if len(group_vals) > 0 else "null"
+                    region_class = group_vals[1] if len(group_vals) > 1 else "Other"
+                    extra_vals = group_vals[2:] if len(group_vals) > 2 else []
+                    record = [year, x_norm, country_class, region_class, volume, maxTripCostExposure, tripCostPerNightExposure] + extra_vals
                     records.append(record)
             
             # Debug message every 10 weeks or at the end
@@ -717,43 +888,32 @@ def aggregate_traveling_unique_by_period(
                 x_norm = pd.Timestamp(year=2000, month=current_month.month, day=1)
                 year = current_month.year
                 
-                # For each group (if segment grouping), calculate metrics
-                if extra_cols:
-                    # Handle single column case to avoid pandas warning
-                    groupby_cols = extra_cols[0] if len(extra_cols) == 1 else extra_cols
-                    for group_vals, group_df in traveling_policies.groupby(groupby_cols, dropna=False):
-                        if not isinstance(group_vals, tuple):
-                            group_vals = (group_vals,)
-                        
-                        # Calculate nights in this month for each policy
-                        nights_in_month = []
-                        for _, policy in group_df.iterrows():
-                            start_in_month = max(policy["dateDepart"], current_month)
-                            end_in_month = min(policy["dateReturn"], month_end)
-                            nights = (end_in_month - start_in_month).days + 1
-                            nights_in_month.append(nights)
-                        
-                        # Aggregate metrics for this group
-                        volume = len(group_df)
-                        maxTripCostExposure = group_df["tripCost"].sum()
-                        tripCostPerNightExposure = (group_df["tripCost"] / group_df["nightsCount"] * nights_in_month).sum()
-                        
-                        record = [year, x_norm, volume, maxTripCostExposure, tripCostPerNightExposure] + list(group_vals)
-                        records.append(record)
-                else:
-                    # No grouping - aggregate all traveling policies
+                # Always group by country_class and region_class, plus any extra_cols
+                groupby_cols = ["country_class", "region_class"] + extra_cols
+                # Handle single column case to avoid pandas warning
+                groupby_cols_single = groupby_cols[0] if len(groupby_cols) == 1 else groupby_cols
+                for group_vals, group_df in traveling_policies.groupby(groupby_cols_single, dropna=False):
+                    if not isinstance(group_vals, tuple):
+                        group_vals = (group_vals,)
+                    
+                    # Calculate nights in this month for each policy
                     nights_in_month = []
-                    for _, policy in traveling_policies.iterrows():
+                    for _, policy in group_df.iterrows():
                         start_in_month = max(policy["dateDepart"], current_month)
                         end_in_month = min(policy["dateReturn"], month_end)
                         nights = (end_in_month - start_in_month).days + 1
                         nights_in_month.append(nights)
                     
-                    volume = len(traveling_policies)
-                    maxTripCostExposure = traveling_policies["tripCost"].sum()
-                    tripCostPerNightExposure = (traveling_policies["tripCost"] / traveling_policies["nightsCount"] * nights_in_month).sum()
+                    # Aggregate metrics for this group
+                    volume = len(group_df)
+                    maxTripCostExposure = group_df["tripCost"].sum()
+                    tripCostPerNightExposure = (group_df["tripCost"] / group_df["nightsCount"] * nights_in_month).sum()
                     
-                    record = [year, x_norm, volume, maxTripCostExposure, tripCostPerNightExposure]
+                    # Extract country_class and region_class from group_vals
+                    country_class = group_vals[0] if len(group_vals) > 0 else "null"
+                    region_class = group_vals[1] if len(group_vals) > 1 else "Other"
+                    extra_vals = group_vals[2:] if len(group_vals) > 2 else []
+                    record = [year, x_norm, country_class, region_class, volume, maxTripCostExposure, tripCostPerNightExposure] + extra_vals
                     records.append(record)
             
             # Debug message every 5 months or at the end
@@ -764,13 +924,13 @@ def aggregate_traveling_unique_by_period(
             current_month = next_month
 
     if not records:
-        cols = ["year", "x", "volume", "maxTripCostExposure", "tripCostPerNightExposure"] + extra_cols
+        cols = ["year", "x", "country_class", "region_class", "volume", "maxTripCostExposure", "tripCostPerNightExposure"] + extra_cols
         return pd.DataFrame(columns=cols)
 
-    cols = ["year", "x", "volume", "maxTripCostExposure", "tripCostPerNightExposure"] + extra_cols
+    cols = ["year", "x", "country_class", "region_class", "volume", "maxTripCostExposure", "tripCostPerNightExposure"] + extra_cols
     df_rec = pd.DataFrame.from_records(records, columns=cols)
 
-    sort_cols = ["x", "year"] + extra_cols
+    sort_cols = ["x", "year", "country_class", "region_class"] + extra_cols
     df_rec = df_rec.sort_values(sort_cols)
     
     print(f"Completed {scenario} aggregation: {len(df_rec)} records")
