@@ -634,10 +634,16 @@ def precompute_aggregates(folder: Path) -> None:
 
     for period in ["day", "week", "month"]:
         # Traveling
-        agg_travel_all = aggregate_traveling_by_period(df, period=period)
+        if period == "day":
+            agg_travel_all = aggregate_traveling_by_period(df, period=period)
+        else:
+            agg_travel_all = aggregate_traveling_unique_by_period(df, period=period)
         agg_travel_all.to_parquet(_agg_filename(folder, "travel", period, False), index=False)
         if "segment" in df.columns:
-            agg_travel_seg = aggregate_traveling_by_period(df, period=period, additional_group_by="segment")
+            if period == "day":
+                agg_travel_seg = aggregate_traveling_by_period(df, period=period, additional_group_by="segment")
+            else:
+                agg_travel_seg = aggregate_traveling_unique_by_period(df, period=period, additional_group_by="segment")
             agg_travel_seg.to_parquet(_agg_filename(folder, "travel", period, True), index=False)
 
         # Departures
@@ -690,7 +696,10 @@ def precompute_all_with_timing(folder_path: str) -> pd.DataFrame:
         t0 = time.perf_counter()
         created = False
         if kind == "travel":
-            agg = aggregate_traveling_by_period(df, period=period, additional_group_by=("segment" if by_segment else None))
+            if period == "day":
+                agg = aggregate_traveling_by_period(df, period=period, additional_group_by=("segment" if by_segment else None))
+            else:
+                agg = aggregate_traveling_unique_by_period(df, period=period, additional_group_by=("segment" if by_segment else None))
         else:
             agg = aggregate_departures_by_period(df, period=period, additional_group_by=("segment" if by_segment else None))
         agg.to_parquet(path, index=False)

@@ -15,6 +15,7 @@ from exposure_data import (
     aggregate_daily_exposure_by_departure_year,
     aggregate_exposure_by_departure_period,
     aggregate_traveling_by_period,
+    aggregate_traveling_unique_by_period,
     aggregate_departures_by_period,
 )
 
@@ -103,9 +104,13 @@ if group_by_segment:
     df_use = df[df["segment"].astype(str).isin(selected_segments)]
     if metric_mode == "Traveling":
         pre = load_precomputed_aggregate(selected_folder, kind="travel", period=period, by_segment=True)
-        data = pre if pre is not None else aggregate_traveling_by_period(
-            df_use, period=period, additional_group_by="segment"
-        )
+        if pre is not None:
+            data = pre
+        else:
+            if period == "day":
+                data = aggregate_traveling_by_period(df_use, period=period, additional_group_by="segment")
+            else:
+                data = aggregate_traveling_unique_by_period(df_use, period=period, additional_group_by="segment")
         years = sorted(data["year"].unique().tolist())
         if year_order_choice == "Descending":
             years = list(reversed(years))
@@ -142,7 +147,13 @@ if group_by_segment:
 else:
     if metric_mode == "Traveling":
         pre = load_precomputed_aggregate(selected_folder, kind="travel", period=period, by_segment=False) if not use_dummy_data else None
-        data = pre if pre is not None else aggregate_traveling_by_period(df, period=period)
+        if pre is not None:
+            data = pre
+        else:
+            if period == "day":
+                data = aggregate_traveling_by_period(df, period=period)
+            else:
+                data = aggregate_traveling_unique_by_period(df, period=period)
         years = sorted(data["year"].unique().tolist())
         if year_order_choice == "Descending":
             years = list(reversed(years))
