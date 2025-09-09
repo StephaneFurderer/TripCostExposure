@@ -464,7 +464,6 @@ if not plot_data.empty:
             category_orders={"year": years},
             labels={"actual_date": "Date", ycol: ycol, "year": "Year"},
         )
-    a
     # Configure x-axis for chronological display
     fig_chrono.update_xaxes(
         tickformat="%Y-%m-%d",
