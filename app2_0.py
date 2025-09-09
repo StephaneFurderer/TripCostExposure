@@ -281,23 +281,35 @@ if precomputed_data is not None:
                     annotation_position="top"
                 )
         
-        # Add holiday lines
+        # Add holiday lines (grouped by week to avoid duplicates)
         holidays = get_us_holidays(years)
+        holiday_weeks = {}
+        
         for holiday_date, holiday_name in holidays:
             holiday_week = holiday_date.isocalendar().week
             holiday_year = holiday_date.isocalendar()[0]
             
-            # Only add line if the holiday year is in our data
+            # Only consider holidays from years in our data
             if holiday_year in years:
-                fig.add_vline(
-                    x=holiday_week,
-                    line_dash="dash",
-                    line_color="gray",
-                    opacity=0.6,
-                    annotation_text=holiday_name,
-                    annotation_position="top",
-                    annotation_font_size=8
-                )
+                if holiday_week not in holiday_weeks:
+                    holiday_weeks[holiday_week] = []
+                holiday_weeks[holiday_week].append(holiday_name)
+        
+        # Add one vertical line per week with all holiday names
+        for week_num, holiday_names in holiday_weeks.items():
+            # Remove duplicates and join holiday names
+            unique_holidays = list(set(holiday_names))
+            annotation_text = ", ".join(unique_holidays)
+            
+            fig.add_vline(
+                x=week_num,
+                line_dash="dash",
+                line_color="gray",
+                opacity=0.6,
+                annotation_text=annotation_text,
+                annotation_position="top",
+                annotation_font_size=8
+            )
     
     st.plotly_chart(fig, use_container_width=True)
     
