@@ -252,12 +252,19 @@ def generate_trip_cost_forecast(historical_trip_costs, start_forecast_week, week
     if historical_trip_costs.empty:
         return pd.DataFrame()
     
-    # Get available years from historical data
-    available_years = sorted(historical_trip_costs['iso_year'].unique())
-    st.sidebar.info(f"Available years for trip cost forecast: {available_years}")
+    # Filter to only use 2023 and 2024 data (exclude 2022 due to outliers)
+    filtered_trip_costs = historical_trip_costs[historical_trip_costs['iso_year'].isin([2023, 2024])]
     
-    # Calculate average trip cost for each ISO week across available years
-    seasonal_pattern = historical_trip_costs.groupby('iso_week')['avg_trip_cost'].mean().reset_index()
+    if filtered_trip_costs.empty:
+        st.sidebar.warning("No 2023-2024 data available for trip cost forecast")
+        return pd.DataFrame()
+    
+    # Get available years from filtered data
+    available_years = sorted(filtered_trip_costs['iso_year'].unique())
+    st.sidebar.info(f"Using years for trip cost forecast: {available_years} (excluding 2022 outliers)")
+    
+    # Calculate average trip cost for each ISO week across filtered years
+    seasonal_pattern = filtered_trip_costs.groupby('iso_week')['avg_trip_cost'].mean().reset_index()
     seasonal_pattern.columns = ['iso_week', 'avg_trip_cost']
     
     # Use the last observed date from trip cost data, not the global start date
