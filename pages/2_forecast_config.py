@@ -170,7 +170,7 @@ def convert_monthly_to_weekly_forecast(monthly_forecast, historical_data, weeks_
     avg_cost = historical_data['avg_trip_cost'].mean() if not historical_data.empty else 0
     
     # Process monthly forecast data - convert YYYYMM to datetime
-    monthly_forecast['month'] = pd.to_datetime(monthly_forecast['month'], format='%Y%m')
+    monthly_forecast['month'] = pd.to_datetime(monthly_forecast['RULOB'], format='%Y%m')
     monthly_forecast = monthly_forecast.sort_values('month')
     
     # Get segment columns (all columns except 'month')
