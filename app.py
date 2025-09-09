@@ -509,6 +509,28 @@ if precomputed_data is not None:
                 st.metric("Avg Trip Cost/Night", f"${plot_avg_trip_cost_per_night_w2:,.2f}")
             
             st.write("**Comparison - Should now match Raw Data Aggregated Totals above!**")
+            
+            # Additional debugging to identify the remaining gap
+            st.write("**🔍 DEBUG: Detailed Comparison**")
+            st.write(f"Raw Data policies: {len(filtered_raw_w2_2024)}")
+            st.write(f"Plot Data policies: {len(plot_raw_w2_2024)}")
+            st.write(f"Policy count difference: {len(filtered_raw_w2_2024) - len(plot_raw_w2_2024)}")
+            
+            # Show sample of policies from each method
+            if len(filtered_raw_w2_2024) > 0:
+                st.write("**Raw Data sample policies:**")
+                st.dataframe(filtered_raw_w2_2024[["idpol", "segment", "dateDepart", "dateReturn", "tripCost", "nightsCount", "country_class", "region_class"]].head(5))
+            
+            if len(plot_raw_w2_2024) > 0:
+                st.write("**Plot Data sample policies:**")
+                st.dataframe(plot_raw_w2_2024[["idpol", "segment", "dateDepart", "dateReturn", "tripCost", "nightsCount", "country_class", "region_class"]].head(5))
+            
+            # Check if policies are identical
+            if len(filtered_raw_w2_2024) == len(plot_raw_w2_2024):
+                policies_match = filtered_raw_w2_2024["idpol"].sort_values().reset_index(drop=True).equals(plot_raw_w2_2024["idpol"].sort_values().reset_index(drop=True))
+                st.write(f"**Same policies in both methods: {policies_match}**")
+            else:
+                st.write("**Different number of policies - this explains the gap!**")
         else:
             st.write("**No data remaining after applying filters**")
     else:
