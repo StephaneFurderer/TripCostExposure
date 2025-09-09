@@ -160,21 +160,30 @@ def load_external_forecast(folder_path):
         st.sidebar.error(f"❌ Error loading forecast CSV: {e}")
         return pd.DataFrame()
 
-def convert_monthly_to_weekly_forecast(monthly_forecast, historical_data, weeks_ahead=26):
+def convert_monthly_to_weekly_forecast(monthly_forecast, historical_data, weeks_ahead=26, selected_segment=None):
     """Convert monthly policy count forecast to weekly forecast"""
     if monthly_forecast.empty:
-        return simple_forecast_fallback(historical_data, weeks_ahead)
+        return simple_forecast_fallback(historical_data, weeks_ahead, selected_segment)
     
     # Get the last week of historical data
     last_week = historical_data['week_start'].max()
     avg_cost = historical_data['avg_trip_cost'].mean() if not historical_data.empty else 0
     
     # Process monthly forecast data - convert YYYYMM to datetime
-    monthly_forecast['month'] = pd.to_datetime(monthly_forecast['RULOB'], format='%Y%m')
+    monthly_forecast['month'] = pd.to_datetime(monthly_forecast['month'], format='%Y%m')
     monthly_forecast = monthly_forecast.sort_values('month')
     
     # Get segment columns (all columns except 'month')
-    segment_columns = [col for col in monthly_forecast.columns if col != 'month']
+    all_segment_columns = [col for col in monthly_forecast.columns if col != 'month']
+    
+    # Filter to selected segment if provided
+    if selected_segment and selected_segment in all_segment_columns:
+        segment_columns = [selected_segment]
+    elif selected_segment:
+        st.warning(f"⚠️ Selected segment '{selected_segment}' not found in CSV. Available: {all_segment_columns}")
+        return pd.DataFrame()
+    else:
+        segment_columns = all_segment_columns
     
     # Generate weekly forecast
     forecast_data = []
@@ -230,7 +239,7 @@ def convert_monthly_to_weekly_forecast(monthly_forecast, historical_data, weeks_
     
     return pd.DataFrame(forecast_data)
 
-def simple_forecast_fallback(historical_data, weeks_ahead=26):
+def simple_forecast_fallback(historical_data, weeks_ahead=26, selected_segment=None):
     """Fallback simple forecasting using historical averages and trends"""
     if historical_data.empty:
         return pd.DataFrame()
@@ -266,13 +275,13 @@ def simple_forecast_fallback(historical_data, weeks_ahead=26):
             'policy_volume': int(projected_volume),
             'avg_trip_cost': avg_cost,
             'total_trip_cost': int(projected_volume * avg_cost),
-            'segment': 'all',
+            'segment': selected_segment or 'all',
             'forecast_type': 'simple_trend'
         })
     
     return pd.DataFrame(forecast_data)
 
-def simple_forecast(historical_data, weeks_ahead=26, folder_path=None):
+def simple_forecast(historical_data, weeks_ahead=26, folder_path=None, selected_segment=None):
     """Main forecasting function - tries external CSV first, falls back to simple trend"""
     if historical_data.empty:
         return pd.DataFrame()
@@ -281,11 +290,11 @@ def simple_forecast(historical_data, weeks_ahead=26, folder_path=None):
     if folder_path:
         external_forecast = load_external_forecast(folder_path)
         if not external_forecast.empty:
-            return convert_monthly_to_weekly_forecast(external_forecast, historical_data, weeks_ahead)
+            return convert_monthly_to_weekly_forecast(external_forecast, historical_data, weeks_ahead, selected_segment)
     
     # Fallback to simple trend forecast
     st.sidebar.info("📊 Using simple trend forecast (no external CSV found)")
-    return simple_forecast_fallback(historical_data, weeks_ahead)
+    return simple_forecast_fallback(historical_data, weeks_ahead, selected_segment)
 
 # Page config
 st.set_page_config(page_title="Forecast Configuration", layout="wide")
@@ -327,6 +336,15 @@ with st.sidebar:
         options=region_filter_options,
         default=region_filter_options,
         help="Filter by US coastal regions"
+    )
+    
+    # Segment filter (will be populated after loading data)
+    st.header("Forecast Segment")
+    selected_segment = st.selectbox(
+        "Select Segment to Forecast",
+        options=[],  # Will be populated after loading historical data
+        index=0,
+        help="Select which segment to focus on for forecasting"
     )
     
     # Forecast parameters
@@ -381,9 +399,29 @@ if folder_path:
     with col4:
         st.metric("Total Volume", f"{weekly_purchases['policy_volume'].sum():,}")
     
+    # Get available segments from historical data
+    available_segments = []
+    if 'segment' in historical_df.columns:
+        available_segments = sorted(historical_df['segment'].dropna().unique().tolist())
+        st.session_state.available_segments = available_segments
+    
+    # Update segment selection if we have segments
+    if 'available_segments' in st.session_state and st.session_state.available_segments:
+        # Update the segment selectbox with available segments
+        st.sidebar.selectbox(
+            "Select Segment to Forecast",
+            options=st.session_state.available_segments,
+            index=0,
+            key="segment_selector"
+        )
+        selected_segment = st.session_state.get('segment_selector', st.session_state.available_segments[0] if st.session_state.available_segments else None)
+    else:
+        selected_segment = None
+        st.warning("⚠️ No segment data found in historical data")
+    
     # Generate forecast
     with st.spinner("Generating forecast..."):
-        forecast_df = simple_forecast(weekly_purchases, weeks_ahead, folder_path)
+        forecast_df = simple_forecast(weekly_purchases, weeks_ahead, folder_path, selected_segment)
     
     if forecast_df.empty:
         st.error("❌ Could not generate forecast")
