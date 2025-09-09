@@ -199,10 +199,10 @@ def filter_aggregate_data(data, selected_countries, selected_regions):
 
 # Unified metric selector based on mode
 if metric_mode == "Traveling":
-    metric_options = ["volume", "maxTripCostExposure", "tripCostPerNightExposure"]
+    metric_options = ["volume", "maxTripCostExposure", "tripCostPerNightExposure", "avgTripCostPerNight"]
     default_idx = 1
 else:
-    metric_options = ["volume", "maxTripCostExposure", "avgTripCostPerNight"]
+    metric_options = ["volume", "maxTripCostExposure", "tripCostPerNightExposure", "avgTripCostPerNight"]
     default_idx = 1
 selected_metric = st.selectbox("Metric to plot", options=metric_options, index=default_idx)
 

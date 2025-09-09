@@ -506,6 +506,7 @@ def compute_traveling_daily(
             "volume": sign * 1,
             "maxTripCostExposure": sign * tmp["tripCost"].values,
             "tripCostPerNightExposure": sign * per_night.values,
+            "avgTripCostPerNight": sign * per_night.values,  # Same as tripCostPerNightExposure for daily
             "country_class": tmp["country_class"].values,
             "region_class": tmp["region_class"].values,
         }
@@ -540,7 +541,7 @@ def compute_traveling_daily(
                 keys = (keys,)
             idx = pd.Index(full_days, name="day")
             # Only reindex numeric metric columns to avoid string fill errors
-            metric_cols = ["volume", "maxTripCostExposure", "tripCostPerNightExposure"]
+            metric_cols = ["volume", "maxTripCostExposure", "tripCostPerNightExposure", "avgTripCostPerNight"]
             grp_metrics = grp[["day"] + metric_cols]
             g = grp_metrics.set_index("day").reindex(idx, fill_value=0)
             # Add back grouping columns as columns
@@ -553,7 +554,7 @@ def compute_traveling_daily(
         deltas_full = deltas_full.sort_values(sort_cols)
         # Perform cumulative sums via group-wise transform
         deltas_full = deltas_full.sort_values(sort_cols)
-        for col in ["volume", "maxTripCostExposure", "tripCostPerNightExposure"]:
+        for col in ["volume", "maxTripCostExposure", "tripCostPerNightExposure", "avgTripCostPerNight"]:
                 # Handle single column case to avoid pandas warning
                 groupby_cols_cumsum = groupby_cols[0] if len(groupby_cols) == 1 else groupby_cols
                 deltas_full[col] = deltas_full.groupby(groupby_cols_cumsum, dropna=False)[col].cumsum()
@@ -561,7 +562,7 @@ def compute_traveling_daily(
     else:
         idx = pd.Index(full_days, name="day")
         deltas_full = deltas.set_index("day").reindex(idx, fill_value=0).reset_index()
-        for col in ["volume", "maxTripCostExposure", "tripCostPerNightExposure"]:
+        for col in ["volume", "maxTripCostExposure", "tripCostPerNightExposure", "avgTripCostPerNight"]:
             deltas_full[col] = deltas_full[col].cumsum()
         daily = deltas_full
 
@@ -569,7 +570,7 @@ def compute_traveling_daily(
     daily["day"] = pd.to_datetime(daily["day"]).dt.date
     dt = pd.to_datetime(daily["day"])  # Timestamp
     daily["year"] = dt.dt.year.astype("int64")
-    return daily[["day", "year", "country_class", "region_class", "volume", "maxTripCostExposure", "tripCostPerNightExposure"] + extra_cols]
+    return daily[["day", "year", "country_class", "region_class", "volume", "maxTripCostExposure", "tripCostPerNightExposure", "avgTripCostPerNight"] + extra_cols]
 
 
 def aggregate_traveling_by_period(
@@ -604,10 +605,11 @@ def aggregate_traveling_by_period(
         volume=("volume", "sum"),
         maxTripCostExposure=("maxTripCostExposure", "sum"),
         tripCostPerNightExposure=("tripCostPerNightExposure", "sum"),
+        avgTripCostPerNight=("avgTripCostPerNight", "mean"),
     )
     sort_cols = ["x", "year", "country_class", "region_class"] + extra_cols
     agg = agg.sort_values(sort_cols)
-    return agg[["year", "x", "country_class", "region_class", "volume", "maxTripCostExposure", "tripCostPerNightExposure"] + extra_cols]
+    return agg[["year", "x", "country_class", "region_class", "volume", "maxTripCostExposure", "tripCostPerNightExposure", "avgTripCostPerNight"] + extra_cols]
 
 
 def compute_departures_daily(
@@ -655,10 +657,11 @@ def compute_departures_daily(
         volume=("tripCost", "count"),
         maxTripCostExposure=("tripCost", "sum"),
         avgTripCostPerNight=("perNight", "mean"),
+        tripCostPerNightExposure=("perNight", "sum"),
     )
     dt = pd.to_datetime(daily["day"])  # Timestamp
     daily["year"] = dt.dt.year.astype("int64")
-    return daily[["day", "year", "country_class", "region_class", "volume", "maxTripCostExposure", "avgTripCostPerNight"] + extra_cols]
+    return daily[["day", "year", "country_class", "region_class", "volume", "maxTripCostExposure", "avgTripCostPerNight", "tripCostPerNightExposure"] + extra_cols]
 
 
 def aggregate_departures_by_period(
@@ -689,10 +692,11 @@ def aggregate_departures_by_period(
         volume=("volume", "sum"),
         maxTripCostExposure=("maxTripCostExposure", "sum"),
         avgTripCostPerNight=("avgTripCostPerNight", "mean"),
+        tripCostPerNightExposure=("tripCostPerNightExposure", "sum"),
     )
     sort_cols = ["x", "year", "country_class", "region_class"] + extra_cols
     agg = agg.sort_values(sort_cols)
-    return agg[["year", "x", "country_class", "region_class", "volume", "maxTripCostExposure", "avgTripCostPerNight"] + extra_cols]
+    return agg[["year", "x", "country_class", "region_class", "volume", "maxTripCostExposure", "avgTripCostPerNight", "tripCostPerNightExposure"] + extra_cols]
 
 
 # ---------- Unique-per-period traveling aggregation ----------
@@ -862,12 +866,13 @@ def aggregate_traveling_unique_by_period(
                     volume = len(group_df)
                     maxTripCostExposure = group_df["tripCost"].sum()
                     tripCostPerNightExposure = (group_df["tripCost"] / group_df["nightsCount"] * nights_in_week).sum()
+                    avgTripCostPerNight = (group_df["tripCost"] / group_df["nightsCount"]).mean()
                     
                     # Extract country_class and region_class from group_vals
                     country_class = group_vals[0] if len(group_vals) > 0 else "null"
                     region_class = group_vals[1] if len(group_vals) > 1 else "Other"
                     extra_vals = list(group_vals[2:]) if len(group_vals) > 2 else []
-                    record = [year, x_norm, country_class, region_class, volume, maxTripCostExposure, tripCostPerNightExposure] + extra_vals
+                    record = [year, x_norm, country_class, region_class, volume, maxTripCostExposure, tripCostPerNightExposure, avgTripCostPerNight] + extra_vals
                     records.append(record)
             
             # Debug message every 10 weeks or at the end
@@ -921,12 +926,13 @@ def aggregate_traveling_unique_by_period(
                     volume = len(group_df)
                     maxTripCostExposure = group_df["tripCost"].sum()
                     tripCostPerNightExposure = (group_df["tripCost"] / group_df["nightsCount"] * nights_in_month).sum()
+                    avgTripCostPerNight = (group_df["tripCost"] / group_df["nightsCount"]).mean()
                     
                     # Extract country_class and region_class from group_vals
                     country_class = group_vals[0] if len(group_vals) > 0 else "null"
                     region_class = group_vals[1] if len(group_vals) > 1 else "Other"
                     extra_vals = list(group_vals[2:]) if len(group_vals) > 2 else []
-                    record = [year, x_norm, country_class, region_class, volume, maxTripCostExposure, tripCostPerNightExposure] + extra_vals
+                    record = [year, x_norm, country_class, region_class, volume, maxTripCostExposure, tripCostPerNightExposure, avgTripCostPerNight] + extra_vals
                     records.append(record)
             
             # Debug message every 5 months or at the end
@@ -937,10 +943,10 @@ def aggregate_traveling_unique_by_period(
             current_month = next_month
 
     if not records:
-        cols = ["year", "x", "country_class", "region_class", "volume", "maxTripCostExposure", "tripCostPerNightExposure"] + extra_cols
+        cols = ["year", "x", "country_class", "region_class", "volume", "maxTripCostExposure", "tripCostPerNightExposure", "avgTripCostPerNight"] + extra_cols
         return pd.DataFrame(columns=cols)
 
-    cols = ["year", "x", "country_class", "region_class", "volume", "maxTripCostExposure", "tripCostPerNightExposure"] + extra_cols
+    cols = ["year", "x", "country_class", "region_class", "volume", "maxTripCostExposure", "tripCostPerNightExposure", "avgTripCostPerNight"] + extra_cols
     df_rec = pd.DataFrame.from_records(records, columns=cols)
 
     sort_cols = ["x", "year", "country_class", "region_class"] + extra_cols
