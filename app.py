@@ -112,6 +112,21 @@ with st.sidebar:
     st.header("Data Source")
     use_dummy_data = st.checkbox("Use dummy data", value=True, help="Toggle to use packaged sample dataset")
     
+    # Data folder selection (moved above filters)
+    if not use_dummy_data:
+        # Look for folders under _data
+        data_folders = []
+        if Path("_data").exists():
+            data_folders = [f.name for f in Path("_data").iterdir() if f.is_dir() and not f.name.startswith(".")]
+        
+        # Also look in current directory for other data folders
+        current_folders = [f.name for f in Path(".").iterdir() if f.is_dir() and not f.name.startswith(".") and f.name != "_data"]
+        
+        all_folders = data_folders + current_folders
+        selected_folder = st.selectbox("Select data folder", [""] + all_folders)
+    else:
+        selected_folder = None
+    
     # Country filter
     country_filter_options = ["US", "ROW", "null"]
     selected_countries = st.multiselect(
@@ -129,12 +144,6 @@ with st.sidebar:
         default=region_filter_options,
         help="Filter by US coastal regions"
     )
-    
-    # Real data folder selection
-    if not use_dummy_data:
-        selected_folder = st.selectbox("Select data folder", [""] + [f.name for f in Path(".").iterdir() if f.is_dir() and not f.name.startswith(".")])
-    else:
-        selected_folder = None
 
 # UI Controls
 group_by_segment = st.checkbox("Group by Segment", value=False)
@@ -151,13 +160,19 @@ if use_dummy_data:
     folder_path = Path("_data")
 else:
     if selected_folder:
+        # Check if selected folder is under _data or in current directory
+        if Path(f"_data/{selected_folder}").exists():
+            base_folder = Path(f"_data/{selected_folder}")
+        else:
+            base_folder = Path(selected_folder)
+        
         # Look for date subfolder in the selected folder
-        folder_contents = [f for f in Path(selected_folder).iterdir() if f.is_dir() and f.name[0].isdigit()]
+        folder_contents = [f for f in base_folder.iterdir() if f.is_dir() and f.name[0].isdigit()]
         if folder_contents:
             # Use the most recent date folder
             folder_path = sorted(folder_contents)[-1]
         else:
-            folder_path = Path(selected_folder)
+            folder_path = base_folder
     else:
         folder_path = None
 
