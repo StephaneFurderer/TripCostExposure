@@ -239,6 +239,10 @@ if precomputed_data is not None:
         selected_segments = st.multiselect("Select segments", segments, default=segments)
         filtered_data = filtered_data[filtered_data["segment"].astype(str).isin(selected_segments)]
     
+    # plot the data for w1 2024
+    filtered_data_w1_2024 = filtered_data[filtered_data["year"] == 2024] & (filtered_data["x"].dt.isocalendar().week == 1)
+    st.write("filtered_data_w1_2024")
+    st.dataframe(filtered_data_w1_2024)
     # Aggregate the filtered data by year and x (time period)
     # Group by year, x, and segment (if present)
     # Note: We don't include country_class and region_class in groupby because
@@ -264,7 +268,7 @@ if precomputed_data is not None:
     if year_order_choice == "Descending":
         years = list(reversed(years))
     data["year"] = pd.Categorical(data["year"], categories=years, ordered=True)
-    
+    #plot the data
 else:
     # No precomputed data available - show error message
     st.error("❌ No precomputed data available. Please run the precomputation first:")
