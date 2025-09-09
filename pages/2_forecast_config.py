@@ -9,13 +9,32 @@ import numpy as np
 from exposure_data import load_folder_policies, classify_country, classify_region
 
 def load_historical_purchases(folder_path):
-    """Load historical purchase data for forecasting"""
+    """Load historical purchase data for forecasting with caching"""
     if not folder_path:
         return pd.DataFrame()
     
+    # Check for cached processed data
+    cache_path = folder_path / "processed_forecast_data.parquet"
     combined_path = folder_path / "combined.parquet"
+    
     if not combined_path.exists():
         return pd.DataFrame()
+    
+    # Load from cache if it exists and is newer than combined.parquet
+    if cache_path.exists():
+        cache_time = cache_path.stat().st_mtime
+        source_time = combined_path.stat().st_mtime
+        
+        if cache_time > source_time:
+            try:
+                df = pd.read_parquet(cache_path)
+                st.sidebar.success("✅ Loaded from cache")
+                return df
+            except Exception as e:
+                st.sidebar.warning(f"⚠️ Cache corrupted, reprocessing... ({e})")
+    
+    # Process data if no cache or cache is outdated
+    st.sidebar.info("🔄 Processing data (first time or cache outdated)...")
     
     df = pd.read_parquet(combined_path)
     
@@ -34,6 +53,13 @@ def load_historical_purchases(folder_path):
         df["region_class"] = df["ZipCode"].apply(classify_region)
     else:
         df["region_class"] = "Other"
+    
+    # Cache the processed data
+    try:
+        df.to_parquet(cache_path, index=False)
+        st.sidebar.success("✅ Data processed and cached")
+    except Exception as e:
+        st.sidebar.warning(f"⚠️ Could not cache data: {e}")
     
     return df
 
