@@ -334,66 +334,10 @@ selected_metric = st.selectbox("Metric to plot", options=metric_options, index=d
 # Main display panel
 ## plot the trip cost exposure by departure year per day, week or month
 
-# ALWAYS use raw data calculation (same as week search) instead of precomputed data
-# This ensures consistency between plot and search methods
-
-# Load raw data
-if use_dummy_data:
-    # Load dummy data
-    df = get_data(use_dummy_data, selected_folder, erase_cache)
-else:
-    # Load real data from combined.parquet
-    if selected_folder:
-        combined_path = os.path.join(selected_folder, "combined.parquet")
-        if os.path.exists(combined_path):
-            df = pd.read_parquet(combined_path)
-            # Ensure datetime types
-            for c in ["dateDepart", "dateReturn", "dateApp"]:
-                if c in df.columns:
-                    df[c] = pd.to_datetime(df[c], errors="coerce")
-
-# Apply country filter to raw data
-if df is not None and not df.empty:
-    # Create country filter mask
-    country_mask = pd.Series(False, index=df.index)
-    
-    if "US" in selected_countries:
-        country_mask |= (df['Country'] == 'US')
-    if "ROW" in selected_countries:
-        # ROW includes all countries that are not US and not null
-        country_mask |= ((df['Country'] != 'US') & (df['Country'].notna()))
-    if "null" in selected_countries:
-        country_mask |= df['Country'].isna()
-    
-    # Apply the filter
-    df = df[country_mask].copy()
-    
-    # Show filter summary
-    st.sidebar.caption(f"📊 Showing {len(df):,} policies after country filtering")
-
-# Calculate plot data using same logic as week search
-if df is not None and not df.empty:
-    # Import classification functions
-    from exposure_data import classify_country, classify_region
-    
-    # Apply country and region classification
-    df_classified = df.copy()
-    df_classified["country_class"] = df_classified["Country"].apply(classify_country)
-    df_classified["region_class"] = df_classified["ZipCode"].apply(classify_region)
-    
-    # Apply region filter
-    region_mask = pd.Series(False, index=df_classified.index)
-    for region in selected_regions:
-        region_mask |= (df_classified['region_class'] == region)
-    df_classified = df_classified[region_mask].copy()
-    
-    # Calculate metrics using week search logic
-    if metric_mode == "Traveling":
-        # Calculate traveling metrics using same logic as week search
-        filtered_data = calculate_traveling_metrics(df_classified, period, group_by_segment)
-    else:
-        # Calculate departures metrics
-        filtered_data = calculate_departures_metrics(df_classified, period, group_by_segment)
+# Use precomputed data for performance, but verify with raw data calculation
+if precomputed_data is not None:
+    # Use precomputed data and apply filters (FAST)
+    filtered_data = filter_aggregate_data(precomputed_data, selected_countries, selected_regions)
     
     # Show filter summary
     if not filtered_data.empty:
@@ -405,8 +349,77 @@ if df is not None and not df.empty:
         selected_segments = st.multiselect("Select segments", segments, default=segments)
         filtered_data = filtered_data[filtered_data["segment"].astype(str).isin(selected_segments)]
 else:
-    st.error("No data available for plotting")
-    filtered_data = pd.DataFrame()
+    # Fallback to raw data calculation if no precomputed data
+    st.warning("⚠️ No precomputed data found. Using raw data calculation (slower).")
+    
+    # Load raw data
+    if use_dummy_data:
+        df = get_data(use_dummy_data, selected_folder, erase_cache)
+    else:
+        if selected_folder:
+            combined_path = os.path.join(selected_folder, "combined.parquet")
+            if os.path.exists(combined_path):
+                df = pd.read_parquet(combined_path)
+                # Ensure datetime types
+                for c in ["dateDepart", "dateReturn", "dateApp"]:
+                    if c in df.columns:
+                        df[c] = pd.to_datetime(df[c], errors="coerce")
+    
+    # Apply country filter to raw data
+    if df is not None and not df.empty:
+        # Create country filter mask
+        country_mask = pd.Series(False, index=df.index)
+        
+        if "US" in selected_countries:
+            country_mask |= (df['Country'] == 'US')
+        if "ROW" in selected_countries:
+            # ROW includes all countries that are not US and not null
+            country_mask |= ((df['Country'] != 'US') & (df['Country'].notna()))
+        if "null" in selected_countries:
+            country_mask |= df['Country'].isna()
+        
+        # Apply the filter
+        df = df[country_mask].copy()
+        
+        # Show filter summary
+        st.sidebar.caption(f"📊 Showing {len(df):,} policies after country filtering")
+    
+    # Calculate plot data using raw data calculation
+    if df is not None and not df.empty:
+        # Import classification functions
+        from exposure_data import classify_country, classify_region
+        
+        # Apply country and region classification
+        df_classified = df.copy()
+        df_classified["country_class"] = df_classified["Country"].apply(classify_country)
+        df_classified["region_class"] = df_classified["ZipCode"].apply(classify_region)
+        
+        # Apply region filter
+        region_mask = pd.Series(False, index=df_classified.index)
+        for region in selected_regions:
+            region_mask |= (df_classified['region_class'] == region)
+        df_classified = df_classified[region_mask].copy()
+        
+        # Calculate metrics using week search logic
+        if metric_mode == "Traveling":
+            # Calculate traveling metrics using same logic as week search
+            filtered_data = calculate_traveling_metrics(df_classified, period, group_by_segment)
+        else:
+            # Calculate departures metrics
+            filtered_data = calculate_departures_metrics(df_classified, period, group_by_segment)
+        
+        # Show filter summary
+        if not filtered_data.empty:
+            st.sidebar.caption(f"📈 Showing {len(filtered_data):,} records after filtering")
+        
+        # Handle segment filtering if needed
+        if group_by_segment and "segment" in filtered_data.columns:
+            segments = sorted(filtered_data["segment"].dropna().astype(str).unique().tolist())
+            selected_segments = st.multiselect("Select segments", segments, default=segments)
+            filtered_data = filtered_data[filtered_data["segment"].astype(str).isin(selected_segments)]
+    else:
+        st.error("No data available for plotting")
+        filtered_data = pd.DataFrame()
     
     # DEBUG: Compare W1 and W2 2024 calculations between plot data and week search
     st.markdown("---")
