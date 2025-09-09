@@ -290,6 +290,74 @@ if precomputed_data is not None:
             st.metric("Remaining Trip Cost", f"${total_remaining_trip_cost:,.2f}")
         with col4:
             st.metric("Avg Trip Cost/Night", f"${avg_trip_cost_per_night:,.2f}")
+        
+        # NEW: Apply country and region classification to raw data and aggregate like plot data
+        st.write("**Raw Data with Country/Region Classification (like plot data):**")
+        
+        # Import classification functions
+        from exposure_data import classify_country, classify_region
+        
+        # Apply country and region classification
+        raw_w1_2024_classified = raw_w1_2024.copy()
+        raw_w1_2024_classified["country_class"] = raw_w1_2024_classified["Country"].apply(classify_country)
+        raw_w1_2024_classified["region_class"] = raw_w1_2024_classified["ZipCode"].apply(classify_region)
+        
+        # Show the classified data
+        st.write("Classified raw data:")
+        st.dataframe(raw_w1_2024_classified[["idpol", "segment", "dateDepart", "dateReturn", "tripCost", "nightsCount", "Country", "country_class", "ZipCode", "region_class"]].head(10))
+        
+        # Apply the same filters as the plot data (if any country/region filters are selected)
+        filtered_raw_w1_2024 = raw_w1_2024_classified.copy()
+        
+        # Apply country filter if selected
+        if selected_countries and "All" not in selected_countries:
+            filtered_raw_w1_2024 = filtered_raw_w1_2024[filtered_raw_w1_2024["country_class"].isin(selected_countries)]
+        
+        # Apply region filter if selected  
+        if selected_regions and "All" not in selected_regions:
+            filtered_raw_w1_2024 = filtered_raw_w1_2024[filtered_raw_w1_2024["region_class"].isin(selected_regions)]
+        
+        # Apply segment filter if selected
+        if selected_segments and "All" not in selected_segments:
+            filtered_raw_w1_2024 = filtered_raw_w1_2024[filtered_raw_w1_2024["segment"].astype(str).isin(selected_segments)]
+        
+        st.write(f"After applying filters: {len(filtered_raw_w1_2024)} policies (from {len(raw_w1_2024_classified)} original)")
+        
+        # Now aggregate the filtered raw data the same way as plot data
+        if not filtered_raw_w1_2024.empty:
+            # Calculate the same metrics as the plot data
+            raw_agg_data = filtered_raw_w1_2024.groupby(["country_class", "region_class"], as_index=False).agg(
+                volume=("idpol", "count"),
+                maxTripCostExposure=("tripCost", "sum"),
+                avgTripCostPerNight=("perNight", "mean"),
+                tripCostPerNightExposure=("remainingTripCost", "sum")
+            )
+            
+            # Add year and x columns to match plot data structure
+            raw_agg_data["year"] = 2024
+            raw_agg_data["x"] = pd.Timestamp("2000-01-03")  # W1 normalized to 2000
+            
+            st.write("**Raw Data Aggregated (like plot data):**")
+            st.dataframe(raw_agg_data)
+            
+            # Calculate totals from aggregated data
+            raw_total_volume = raw_agg_data["volume"].sum()
+            raw_total_max_trip_cost = raw_agg_data["maxTripCostExposure"].sum()
+            raw_total_trip_cost_per_night = raw_agg_data["tripCostPerNightExposure"].sum()
+            raw_avg_trip_cost_per_night = raw_agg_data["avgTripCostPerNight"].mean()
+            
+            st.write("**Raw Data Aggregated Totals:**")
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Volume", raw_total_volume)
+            with col2:
+                st.metric("Max Trip Cost", f"${raw_total_max_trip_cost:,.2f}")
+            with col3:
+                st.metric("Trip Cost/Night Exposure", f"${raw_total_trip_cost_per_night:,.2f}")
+            with col4:
+                st.metric("Avg Trip Cost/Night", f"${raw_avg_trip_cost_per_night:,.2f}")
+        else:
+            st.write("**No data remaining after applying filters**")
     
     # Show what the plot data contains
     if not filtered_data_w1_2024.empty:
