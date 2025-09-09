@@ -764,13 +764,32 @@ else:
 years = sorted(filtered_data["year"].unique().tolist())
 if year_order_choice == "Descending":
     years = list(reversed(years))
-filtered_data["year"] = pd.Categorical(filtered_data["year"], categories=years, ordered=True)
+
+# Aggregate filtered_data by plotting dimensions (x, year, segment)
+plot_group_cols = ["year", "x"]
+if group_by_segment and "segment" in filtered_data.columns:
+    plot_group_cols.append("segment")
+
+# Create aggregation dictionary for all available metrics
+plot_agg_dict = {}
+for col in ["volume", "maxTripCostExposure", "tripCostPerNightExposure", "avgTripCostPerNight"]:
+    if col in filtered_data.columns:
+        if col == "avgTripCostPerNight":
+            plot_agg_dict[col] = "mean"  # Average of averages
+        else:
+            plot_agg_dict[col] = "sum"   # Sum across country/region groups
+
+# Aggregate data for plotting
+plot_data = filtered_data.groupby(plot_group_cols, as_index=False).agg(plot_agg_dict)
+
+# Apply year ordering to plot data
+plot_data["year"] = pd.Categorical(plot_data["year"], categories=years, ordered=True)
 
 # Create the plot
 ycol = selected_metric
-if group_by_segment and "segment" in filtered_data.columns:
+if group_by_segment and "segment" in plot_data.columns:
     fig = px.line(
-        filtered_data,
+        plot_data,
         x="x",
         y=ycol,
         color="year",
@@ -781,7 +800,7 @@ if group_by_segment and "segment" in filtered_data.columns:
     )
 else:
     fig = px.line(
-        filtered_data,
+        plot_data,
         x="x",
         y=ycol,
         color="year",
@@ -826,32 +845,32 @@ st.plotly_chart(fig, use_container_width=True)
 st.markdown("---")
 st.subheader("Raw Data Underlying the Plot")
 
-if 'data' in locals() and not data.empty:
+if 'plot_data' in locals() and not plot_data.empty:
     st.write("This is the exact dataframe used to create the plot above:")
-    st.dataframe(data, use_container_width=True)
+    st.dataframe(plot_data, use_container_width=True)
     
     # Show some basic info about the data
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("Total Rows", len(data))
+        st.metric("Total Rows", len(plot_data))
     with col2:
-        st.metric("Unique Years", data['year'].nunique() if 'year' in data.columns else 0)
+        st.metric("Unique Years", plot_data['year'].nunique() if 'year' in plot_data.columns else 0)
     with col3:
-        st.metric("Unique Segments", data['segment'].nunique() if 'segment' in data.columns else 0)
+        st.metric("Unique Segments", plot_data['segment'].nunique() if 'segment' in plot_data.columns else 0)
     with col4:
         st.metric("Metric Column", ycol)
     
     # Show data types and sample values
     st.write("**Data Types:**")
-    st.write(data.dtypes)
+    st.write(plot_data.dtypes)
     
     # Show sample values for debugging
     st.write("**Sample Values (first 10 rows):**")
-    st.write(data.head(10))
+    st.write(plot_data.head(10))
     
     # Show specific W1 2024 data if it exists
-    if 'year' in data.columns and 'x' in data.columns:
-        w1_2024_data = data[(data['year'] == 2024) & (data['x'].dt.isocalendar().week == 1)]
+    if 'year' in plot_data.columns and 'x' in plot_data.columns:
+        w1_2024_data = plot_data[(plot_data['year'] == 2024) & (plot_data['x'].dt.isocalendar().week == 1)]
         if not w1_2024_data.empty:
             st.write("**W1 2024 Data (the problematic week):**")
             st.write(w1_2024_data)
@@ -864,11 +883,11 @@ else:
 st.markdown("---")
 st.subheader("Data Table: Metric by ISO Week and Year")
 
-if 'data' in locals() and not data.empty:
+if 'plot_data' in locals() and not plot_data.empty:
     # Create a pivot table for better visualization
     if period == "week":
         # For weeks, create a table with ISO week numbers
-        data_table = data.copy()
+        data_table = plot_data.copy()
         
         # Convert x to ISO week number
         if 'x' in data_table.columns:
