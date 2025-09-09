@@ -745,11 +745,11 @@ else:
         years = list(reversed(years))
     data["year"] = pd.Categorical(data["year"], categories=years, ordered=True)
     #plot the data
-else:
-    # No precomputed data available - show error message
-    st.error("❌ No precomputed data available. Please run the precomputation first:")
-    st.code("python3 test_precompute.py _data --limit-rows 1000", language="bash")
-    st.stop()
+#else:
+#    # No precomputed data available - show error message
+ #   st.error("❌ No precomputed data available. Please run the precomputation first:")
+  #  st.code("python3 test_precompute.py _data --limit-rows 1000", language="bash")
+   # st.stop()
 
 # Create the plot
 ycol = selected_metric
