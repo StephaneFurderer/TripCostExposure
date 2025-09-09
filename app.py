@@ -379,6 +379,39 @@ if 'data' in locals() and not data.empty:
             
             st.dataframe(pivot_table, use_container_width=True)
             
+            # Add week date reference table
+            st.subheader("Week Date Reference")
+            week_ref_data = []
+            for year in sorted(data_table['iso_year'].unique()):
+                for week in sorted(data_table[data_table['iso_year'] == year]['iso_week'].unique()):
+                    # Calculate ISO week start and end dates
+                    try:
+                        # Get the first day of the ISO week
+                        week_start = pd.to_datetime(f"{year}-W{week:02d}-1", format='%Y-W%W-%w')
+                        week_end = week_start + pd.Timedelta(days=6)
+                        week_ref_data.append({
+                            'Year': year,
+                            'Week': week,
+                            'Start Date': week_start.strftime('%Y-%m-%d'),
+                            'End Date': week_end.strftime('%Y-%m-%d'),
+                            'Start Day': week_start.strftime('%A'),
+                            'End Day': week_end.strftime('%A')
+                        })
+                    except:
+                        # Fallback for edge cases
+                        week_ref_data.append({
+                            'Year': year,
+                            'Week': week,
+                            'Start Date': 'N/A',
+                            'End Date': 'N/A',
+                            'Start Day': 'N/A',
+                            'End Day': 'N/A'
+                        })
+            
+            if week_ref_data:
+                week_ref_df = pd.DataFrame(week_ref_data)
+                st.dataframe(week_ref_df, use_container_width=True)
+            
             # Show summary statistics
             col1, col2, col3 = st.columns(3)
             with col1:
