@@ -341,7 +341,8 @@ if 'data' in locals() and not data.empty:
         if 'x' in data_table.columns:
             # x is normalized to 2000, so we need to extract the week number
             data_table['iso_week'] = data_table['x'].dt.isocalendar().week
-            data_table['iso_year'] = data_table['x'].dt.year
+            # Use the actual year column, not the normalized x year
+            data_table['iso_year'] = data_table['year']
         
         # Create pivot table
         pivot_cols = ['iso_week', 'iso_year', ycol]
@@ -396,7 +397,8 @@ if 'data' in locals() and not data.empty:
         if 'x' in data_table.columns:
             data_table['month'] = data_table['x'].dt.month
             data_table['month_name'] = data_table['x'].dt.strftime('%b')
-            data_table['year'] = data_table['x'].dt.year
+            # Use the actual year column, not the normalized x year
+            # data_table['year'] is already the real year from the data
         
         # Create pivot table
         if group_by_segment and 'segment' in data_table.columns:
