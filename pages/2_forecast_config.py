@@ -416,10 +416,15 @@ def analyze_departure_patterns(historical_df, selected_segment=None, max_depart_
     if folder_path and not patterns_df.empty:
         try:
             cache_file = folder_path / f"departure_patterns_{selected_segment or 'all'}.parquet"
+            st.sidebar.info(f"💾 Caching to: {cache_file}")
             patterns_df.to_parquet(cache_file, index=False)
             st.sidebar.success(f"✅ Cached departure patterns for {selected_segment or 'all'}")
         except Exception as e:
             st.sidebar.warning(f"⚠️ Could not cache patterns: {e}")
+    elif not folder_path:
+        st.sidebar.warning("⚠️ No folder_path provided for caching")
+    elif patterns_df.empty:
+        st.sidebar.warning("⚠️ No patterns data to cache")
     
     return patterns_df
 
@@ -526,10 +531,15 @@ def create_departure_forecast(purchase_forecast, departure_patterns, selected_se
     if folder_path and not forecast_df.empty:
         try:
             cache_file = folder_path / f"departure_forecast_{selected_segment or 'all'}.parquet"
+            st.sidebar.info(f"💾 Caching forecast to: {cache_file}")
             forecast_df.to_parquet(cache_file, index=False)
             st.sidebar.success(f"✅ Cached departure forecast for {selected_segment or 'all'}")
         except Exception as e:
             st.sidebar.warning(f"⚠️ Could not cache forecast: {e}")
+    elif not folder_path:
+        st.sidebar.warning("⚠️ No folder_path provided for forecast caching")
+    elif forecast_df.empty:
+        st.sidebar.warning("⚠️ No forecast data to cache")
     
     return forecast_df
 
@@ -590,10 +600,15 @@ def calculate_traveling_policies_by_week(departure_forecast_df, start_date, end_
     if folder_path and not traveling_df.empty:
         try:
             cache_file = folder_path / f"traveling_policies_{selected_segment or 'all'}.parquet"
+            st.sidebar.info(f"💾 Caching traveling to: {cache_file}")
             traveling_df.to_parquet(cache_file, index=False)
             st.sidebar.success(f"✅ Cached traveling policies for {selected_segment or 'all'}")
         except Exception as e:
             st.sidebar.warning(f"⚠️ Could not cache traveling policies: {e}")
+    elif not folder_path:
+        st.sidebar.warning("⚠️ No folder_path provided for traveling caching")
+    elif traveling_df.empty:
+        st.sidebar.warning("⚠️ No traveling data to cache")
     
     return traveling_df
 
@@ -785,6 +800,7 @@ if selected_folder:
 
 # Load and process data
 if folder_path:
+    st.sidebar.info(f"📁 Using folder: {folder_path}")
     with st.spinner("Loading historical data..."):
         historical_df = load_historical_purchases(folder_path)
     
