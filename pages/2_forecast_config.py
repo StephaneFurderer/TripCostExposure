@@ -82,13 +82,13 @@ def load_external_forecast(folder_path):
     df = pd.read_csv(forecast_file)
     return df
 
-def convert_monthly_to_weekly_forecast(monthly_forecast, historical_data, weeks_ahead=104, selected_segment=None):
+def convert_monthly_to_weekly_forecast(monthly_forecast, historical_data, start_forecast_week, weeks_ahead=104, selected_segment=None):
     """Convert monthly forecast to weekly using historical distribution"""
     if monthly_forecast.empty or historical_data.empty:
         return pd.DataFrame()
     
-    # Get last historical week
-    last_week = historical_data['week_start'].max()
+    # Use global forecast start week
+    last_week = start_forecast_week
     
     forecast_data = []
     model_point_id = 1
@@ -235,12 +235,13 @@ def analyze_historical_trip_costs_by_week(historical_df, selected_segment=None, 
     return weekly_trip_costs
 
 
-def generate_trip_cost_forecast(historical_trip_costs, weeks_ahead=104):
+def generate_trip_cost_forecast(historical_trip_costs, start_forecast_week, weeks_ahead=104):
     """
     Generate trip cost forecast using average of available years (2023, 2024, 2025)
     
     Parameters:
     - historical_trip_costs: DataFrame with historical trip cost analysis
+    - start_forecast_week: Global start date for all forecasts
     - weeks_ahead: Number of weeks to forecast
     
     Returns:
@@ -257,12 +258,9 @@ def generate_trip_cost_forecast(historical_trip_costs, weeks_ahead=104):
     seasonal_pattern = historical_trip_costs.groupby('iso_week')['avg_trip_cost'].mean().reset_index()
     seasonal_pattern.columns = ['iso_week', 'avg_trip_cost']
     
-    # Get the last date from historical data
-    last_date = historical_trip_costs['purchase_week'].max()
-    
-    # Generate future weeks
+    # Generate future weeks from global start date
     future_weeks = pd.date_range(
-        start=last_date + pd.Timedelta(weeks=1), 
+        start=start_forecast_week + pd.Timedelta(weeks=1), 
         periods=weeks_ahead, 
         freq='W-MON'
     )
@@ -464,12 +462,12 @@ def create_traveling_forecast_by_cohort(purchase_forecast, traveling_patterns, s
     return pd.DataFrame(traveling_forecast)
 
 
-def simple_forecast(historical_data, weeks_ahead=26, folder_path=None, selected_segment=None):
+def simple_forecast(historical_data, start_forecast_week, weeks_ahead=26, folder_path=None, selected_segment=None):
     """Generate forecast using external CSV data"""
     if folder_path:
         external_forecast = load_external_forecast(folder_path)
         if not external_forecast.empty:
-            return convert_monthly_to_weekly_forecast(external_forecast, historical_data, weeks_ahead, selected_segment)
+            return convert_monthly_to_weekly_forecast(external_forecast, historical_data, start_forecast_week, weeks_ahead, selected_segment)
     
     return pd.DataFrame()
 
@@ -522,14 +520,16 @@ if folder_path and folder_path.exists():
         st.sidebar.subheader("Forecast Parameters")
         weeks_ahead = 104  # Fixed at 104 weeks (2 years)
         
+        # Define global forecast start week
+        weekly_purchases = aggregate_weekly_purchases(historical_df, selected_countries, selected_regions)
+        start_forecast_week = weekly_purchases['week_start'].max()
+        st.sidebar.info(f"📅 Global forecast start week: {start_forecast_week.strftime('%Y-%m-%d')}")
+        
         # Generate forecast
         if st.sidebar.button("Generate Forecast", type="primary"):
-            # Aggregate historical data
-            weekly_purchases = aggregate_weekly_purchases(historical_df, selected_countries, selected_regions)
-            
             # Generate purchase forecast
             with st.spinner("Generating purchase forecast..."):
-                forecast_df = simple_forecast(weekly_purchases, weeks_ahead, folder_path, selected_segment)
+                forecast_df = simple_forecast(weekly_purchases, start_forecast_week, weeks_ahead, folder_path, selected_segment)
             
             if forecast_df.empty:
                 st.error("❌ Could not generate forecast")
@@ -572,7 +572,7 @@ if folder_path and folder_path.exists():
                 st.subheader("💰 Historical Trip Cost Analysis + Forecast")
                 
                 # Generate trip cost forecast
-                trip_cost_forecast = generate_trip_cost_forecast(trip_cost_analysis, weeks_ahead=104)
+                trip_cost_forecast = generate_trip_cost_forecast(trip_cost_analysis, start_forecast_week, weeks_ahead=104)
                 
                 # Combine historical and forecast data
                 if not trip_cost_forecast.empty:
