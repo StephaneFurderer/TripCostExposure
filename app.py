@@ -1,5 +1,6 @@
 import os
 import io
+from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
@@ -103,36 +104,50 @@ period = st.selectbox("Time grain", options=["day", "week", "month"], index=1)
 metric_mode = st.radio("Metric base", options=["Departures", "Traveling"], index=0, horizontal=True)
 year_order_choice = st.selectbox("Departure Year order", options=["Ascending", "Descending"], index=0)
 
-# Try to load precomputed aggregates first (for real data)
+# Try to load precomputed aggregates first (for both dummy and real data)
 precomputed_data = None
-if not use_dummy_data and selected_folder:
-    # Try to load precomputed aggregates
-    from pathlib import Path
-    folder_path = Path(selected_folder)
-    
-    # Map to aggregate file names
+folder_path = None
+
+# Determine folder path for precomputed data
+if use_dummy_data:
+    # For dummy data, look in _data folder
+    folder_path = Path("_data")
+else:
+    # For real data, use selected folder
+    if selected_folder:
+        folder_path = Path(selected_folder)
+
+if folder_path:
+    # Map to aggregate file names (we only create by_segment files now)
     if metric_mode == "Traveling":
         if period == "day":
-            agg_file = folder_path / "agg_travel_day_all.parquet"
+            agg_file = folder_path / "agg_travel_day_by_segment.parquet"
         else:
-            agg_file = folder_path / f"agg_travel_{period}_all.parquet"
+            agg_file = folder_path / f"agg_travel_{period}_by_segment.parquet"
     else:
-        agg_file = folder_path / f"agg_depart_{period}_all.parquet"
-    
-    if group_by_segment:
-        # Try segment version
-        if metric_mode == "Traveling":
-            if period == "day":
-                agg_file = folder_path / "agg_travel_day_by_segment.parquet"
-            else:
-                agg_file = folder_path / f"agg_travel_{period}_by_segment.parquet"
-        else:
-            agg_file = folder_path / f"agg_depart_{period}_by_segment.parquet"
+        agg_file = folder_path / f"agg_depart_{period}_by_segment.parquet"
     
     # Load precomputed data if available
     if agg_file.exists():
         precomputed_data = pd.read_parquet(agg_file)
         st.sidebar.success(f"✅ Loaded precomputed {period} {metric_mode.lower()} data")
+        
+        # If user doesn't want segment grouping, we need to aggregate the segment data
+        if not group_by_segment and "segment" in precomputed_data.columns:
+            # Aggregate across segments to get "all" data
+            group_cols = ["year", "x", "country_class", "region_class"]
+            agg_dict = {}
+            if "volume" in precomputed_data.columns:
+                agg_dict["volume"] = "sum"
+            if "maxTripCostExposure" in precomputed_data.columns:
+                agg_dict["maxTripCostExposure"] = "sum"
+            if "tripCostPerNightExposure" in precomputed_data.columns:
+                agg_dict["tripCostPerNightExposure"] = "sum"
+            if "avgTripCostPerNight" in precomputed_data.columns:
+                agg_dict["avgTripCostPerNight"] = "mean"
+            
+            precomputed_data = precomputed_data.groupby(group_cols, as_index=False).agg(agg_dict)
+            st.sidebar.info("📊 Aggregated segment data to show 'all' view")
     else:
         st.sidebar.warning(f"⚠️ Precomputed {period} {metric_mode.lower()} data not found, will compute from raw data")
 
@@ -250,106 +265,11 @@ if precomputed_data is not None:
         years = list(reversed(years))
     data["year"] = pd.Categorical(data["year"], categories=years, ordered=True)
     
-elif group_by_segment:
-    # Fallback to raw data computation
-    segments = sorted(df["segment"].dropna().astype(str).unique().tolist())
-    selected_segments = st.multiselect("Select segments", segments, default=segments)
-    df_use = df[df["segment"].astype(str).isin(selected_segments)]
-    if metric_mode == "Traveling":
-        # Always use filtered raw data for aggregates to respect country filtering
-        if period == "day":
-            data = aggregate_traveling_by_period(df_use, period=period, additional_group_by="segment")
-        else:
-            data = aggregate_traveling_unique_by_period(df_use, period=period, additional_group_by="segment", folder_path=selected_folder)
-        
-        # Apply country and region filters to aggregate data
-        data = filter_aggregate_data(data, selected_countries, selected_regions)
-        
-        years = sorted(data["year"].unique().tolist())
-        if year_order_choice == "Descending":
-            years = list(reversed(years))
-        data["year"] = pd.Categorical(data["year"], categories=years, ordered=True)
-    else:
-        # Fallback to raw data computation for departures
-        data = aggregate_departures_by_period(df_use, period=period, additional_group_by="segment")
-        
-        # Apply country and region filters to aggregate data
-        data = filter_aggregate_data(data, selected_countries, selected_regions)
-        
-        years = sorted(data["year"].unique().tolist())
-        if year_order_choice == "Descending":
-            years = list(reversed(years))
-        data["year"] = pd.Categorical(data["year"], categories=years, ordered=True)
-
 else:
-    # Non-segmented case
-    if precomputed_data is not None:
-        # Use precomputed data and apply filters
-        filtered_data = filter_aggregate_data(precomputed_data, selected_countries, selected_regions)
-        
-        # Show filter summary
-        if not filtered_data.empty:
-            st.sidebar.caption(f"📈 Showing {len(filtered_data):,} records after filtering")
-        
-        # Aggregate the filtered data by year and x (time period)
-        # Group by year and x only (no segment, no country_class, no region_class)
-        group_cols = ["year", "x"]
-        
-        # Aggregate metrics
-        agg_dict = {}
-        if "volume" in filtered_data.columns:
-            agg_dict["volume"] = "sum"
-        if "maxTripCostExposure" in filtered_data.columns:
-            agg_dict["maxTripCostExposure"] = "sum"
-        if "tripCostPerNightExposure" in filtered_data.columns:
-            agg_dict["tripCostPerNightExposure"] = "sum"
-        if "avgTripCostPerNight" in filtered_data.columns:
-            agg_dict["avgTripCostPerNight"] = "mean"
-        
-        data = filtered_data.groupby(group_cols, as_index=False).agg(agg_dict)
-        
-        years = sorted(data["year"].unique().tolist())
-        if year_order_choice == "Descending":
-            years = list(reversed(years))
-        data["year"] = pd.Categorical(data["year"], categories=years, ordered=True)
-    else:
-        # Fallback to raw data computation
-        if metric_mode == "Traveling":
-            if period == "day":
-                data = aggregate_traveling_by_period(df, period=period)
-            else:
-                data = aggregate_traveling_unique_by_period(df, period=period, folder_path=selected_folder)
-        else:
-            data = aggregate_departures_by_period(df, period=period)
-        
-        # Apply country and region filters to aggregate data
-        filtered_data = filter_aggregate_data(data, selected_countries, selected_regions)
-        
-        # Show filter summary
-        if not filtered_data.empty:
-            st.sidebar.caption(f"📈 Showing {len(filtered_data):,} records after filtering")
-        
-        # Aggregate the filtered data by year and x (time period)
-        # Group by year and x only (no segment, no country_class, no region_class)
-        group_cols = ["year", "x"]
-        
-        # Aggregate metrics
-        agg_dict = {}
-        if "volume" in filtered_data.columns:
-            agg_dict["volume"] = "sum"
-        if "maxTripCostExposure" in filtered_data.columns:
-            agg_dict["maxTripCostExposure"] = "sum"
-        if "tripCostPerNightExposure" in filtered_data.columns:
-            agg_dict["tripCostPerNightExposure"] = "sum"
-        if "avgTripCostPerNight" in filtered_data.columns:
-            agg_dict["avgTripCostPerNight"] = "mean"
-        
-        data = filtered_data.groupby(group_cols, as_index=False).agg(agg_dict)
-        
-        years = sorted(data["year"].unique().tolist())
-        if year_order_choice == "Descending":
-            years = list(reversed(years))
-        data["year"] = pd.Categorical(data["year"], categories=years, ordered=True)
+    # No precomputed data available - show error message
+    st.error("❌ No precomputed data available. Please run the precomputation first:")
+    st.code("python3 test_precompute.py _data --limit-rows 1000", language="bash")
+    st.stop()
 
 # Create the plot
 ycol = selected_metric
