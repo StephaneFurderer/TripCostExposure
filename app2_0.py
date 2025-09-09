@@ -90,8 +90,22 @@ def get_us_holidays(years):
 def load_week_search_df(selected_folder):
     """Load raw data for week search functionality"""
     if selected_folder:
-        combined_path = os.path.join(selected_folder, "combined.parquet")
-        if os.path.exists(combined_path):
+        # Use same folder path logic as main app
+        if Path(f"_data/{selected_folder}").exists():
+            base_folder = Path(f"_data/{selected_folder}")
+        else:
+            base_folder = Path(selected_folder)
+        
+        # Look for date subfolder in the selected folder
+        folder_contents = [f for f in base_folder.iterdir() if f.is_dir() and f.name[0].isdigit()]
+        if folder_contents:
+            # Use the most recent date folder
+            folder_path = sorted(folder_contents)[-1]
+        else:
+            folder_path = base_folder
+        
+        combined_path = folder_path / "combined.parquet"
+        if combined_path.exists():
             df = pd.read_parquet(combined_path)
             for c in ["dateDepart", "dateReturn", "dateApp"]:
                 if c in df.columns:
@@ -364,6 +378,36 @@ with st.expander("Week Search", expanded=False):
     
     if "week_search_df" in st.session_state and not st.session_state.week_search_df.empty:
         week_df = st.session_state.week_search_df
+        
+        # Add country and region classification (same as main app)
+        from exposure_data import classify_country, classify_region
+        
+        if "Country" in week_df.columns:
+            week_df["country_class"] = week_df["Country"].apply(classify_country)
+        else:
+            week_df["country_class"] = "null"
+        
+        if "ZipCode" in week_df.columns:
+            week_df["region_class"] = week_df["ZipCode"].apply(classify_region)
+        else:
+            week_df["region_class"] = "Other"
+        
+        # Apply country and region filters (same as main app)
+        country_mask = pd.Series(False, index=week_df.index)
+        if "US" in selected_countries:
+            country_mask |= (week_df['country_class'] == 'US')
+        if "ROW" in selected_countries:
+            country_mask |= (week_df['country_class'] == 'ROW')
+        if "null" in selected_countries:
+            country_mask |= (week_df['country_class'] == 'null')
+        
+        region_mask = pd.Series(False, index=week_df.index)
+        for region in selected_regions:
+            region_mask |= (week_df['region_class'] == region)
+        
+        # Apply filters
+        week_df = week_df[country_mask & region_mask].copy()
+        
         years = sorted(week_df["dateDepart"].dt.year.dropna().astype(int).unique().tolist())
         default_year = years[-1] if years else pd.Timestamp.today().year
         
