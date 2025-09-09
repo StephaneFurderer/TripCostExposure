@@ -753,16 +753,18 @@ else:
     
     data = filtered_data.groupby(group_cols, as_index=False).agg(agg_dict)
     
-    years = sorted(data["year"].unique().tolist())
-    if year_order_choice == "Descending":
-        years = list(reversed(years))
-    data["year"] = pd.Categorical(data["year"], categories=years, ordered=True)
     #plot the data
 #else:
 #    # No precomputed data available - show error message
  #   st.error("❌ No precomputed data available. Please run the precomputation first:")
   #  st.code("python3 test_precompute.py _data --limit-rows 1000", language="bash")
    # st.stop()
+
+# Define years for plot ordering (must be outside conditional blocks)
+years = sorted(filtered_data["year"].unique().tolist())
+if year_order_choice == "Descending":
+    years = list(reversed(years))
+filtered_data["year"] = pd.Categorical(filtered_data["year"], categories=years, ordered=True)
 
 # Create the plot
 ycol = selected_metric
