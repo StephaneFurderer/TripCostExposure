@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Optional, List, Union
 
 import pandas as pd
@@ -843,7 +844,7 @@ def aggregate_traveling_unique_by_period(
             
             if len(traveling_policies) > 0:
                 # Calculate normalized x-axis value
-                x_norm = pd.Timestamp(2000, 1, 3) + pd.to_timedelta((current_week.isocalendar().week - 1) * 7, unit="D")
+                x_norm = current_week.isocalendar()[1] #pd.Timestamp(2000, 1, 3) + pd.to_timedelta((current_week.isocalendar().week - 1) * 7, unit="D")
                 year = current_week.year
                 
                 # Calculate per-night cost (same as week search)
@@ -1071,3 +1072,151 @@ def precompute_all_with_timing(folder_path: str) -> pd.DataFrame:
     return pd.DataFrame.from_records(records)
 
 
+
+def aggregate_travel_policies_weekly_by_location(
+    df: pd.DataFrame,
+    start_date: Optional[pd.Timestamp] = None,
+    end_date: Optional[pd.Timestamp] = None,
+) -> pd.DataFrame:
+    """
+    Aggregate traveling policies on a weekly basis by ZIP code and Country.
+
+    Weeks are Monday (start) to Sunday (end). A policy is considered traveling in a week
+    if dateDepart <= week_end AND dateReturn > week_start (overlap logic).
+
+    Expected normalized columns: ['idpol', 'segment', 'Country', 'ZipCode',
+                                  'dateApp', 'dateDepart', 'dateReturn', 'tripCost']
+
+    Parameters
+    - df: normalized policies DataFrame
+    - start_date/end_date: optional bounds; defaults to df min/max date across depart/return
+
+    Returns
+    - DataFrame of weekly aggregations with location and segment breakdown.
+    """
+    if df.empty:
+        return pd.DataFrame()
+
+    # Ensure required date columns exist and are datetime
+    for col in ["dateApp", "dateDepart", "dateReturn"]:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], errors="coerce")
+
+    # Resolve possible alternative column names if needed (defensive)
+    if "Country" not in df.columns:
+        lower_cols = {c.lower(): c for c in df.columns}
+        if "country" in lower_cols:
+            df["Country"] = df[lower_cols["country"]]
+    if "ZipCode" not in df.columns:
+        lower_cols = {c.lower(): c for c in df.columns}
+        for alias in ["zipcode", "zip", "zip_code", "postalcode", "postal_code"]:
+            if alias in lower_cols:
+                df["ZipCode"] = df[lower_cols[alias]]
+                break
+
+    # Derive overall date range if not provided
+    all_dates = pd.concat([df["dateDepart"], df["dateReturn"]]).dropna()
+    overall_start = all_dates.min().normalize()
+    overall_end = all_dates.max().normalize()
+    if start_date is None:
+        start_date = overall_start
+    else:
+        start_date = pd.to_datetime(start_date).normalize()
+    if end_date is None:
+        end_date = overall_end
+    else:
+        end_date = pd.to_datetime(end_date).normalize()
+
+    if pd.isna(start_date) or pd.isna(end_date) or start_date > end_date:
+        return pd.DataFrame()
+
+    # Create weekly periods (weeks ending on Sunday)
+    weekly_periods = pd.date_range(start=start_date, end=end_date, freq="W-SUN")
+
+    # Pre-calc to speed up
+    df_local = df.copy()
+    # Ensure tripCost numeric
+    if "tripCost" in df_local.columns:
+        df_local["tripCost"] = pd.to_numeric(df_local["tripCost"], errors="coerce").fillna(0.0)
+    # ID policy as string
+    if "idpol" in df_local.columns:
+        df_local["idpol"] = df_local["idpol"].astype("string")
+    # Segment as string (kept)
+    if "segment" in df_local.columns:
+        df_local["segment"] = df_local["segment"].astype("string")
+
+    results: List[dict] = []
+
+    for week_end in weekly_periods:
+        week_start = (week_end - timedelta(days=6)).normalize()
+
+        # Overlap logic: traveling during the week
+        mask = (df_local["dateReturn"] > week_start) & (df_local["dateDepart"] <= week_end)
+        week_df = df_local.loc[mask].copy()
+        if week_df.empty:
+            continue
+
+        # Group by location
+        loc_cols = [c for c in ["Country", "ZipCode"] if c in week_df.columns]
+        if not loc_cols:
+            # No location information available
+            continue
+
+        for loc_vals, grp in week_df.groupby(loc_cols, dropna=False):
+            if not isinstance(loc_vals, tuple):
+                loc_vals = (loc_vals,)
+            country_val = None
+            zip_val = None
+            # Map back values by column order
+            for i, c in enumerate(loc_cols):
+                if c == "Country":
+                    country_val = loc_vals[i]
+                elif c == "ZipCode":
+                    zip_val = loc_vals[i]
+
+            summary: dict = {
+                "week_start": week_start,
+                "week_end": week_end,
+                "year": int(week_start.year),
+                "week_number": int(pd.Timestamp(week_start).isocalendar().week),
+                "year_week": f"{int(week_start.year)}-W{int(pd.Timestamp(week_start).isocalendar().week):02d}",
+                "country": country_val if country_val is not None else pd.NA,
+                "zip_code": zip_val if zip_val is not None else pd.NA,
+                # Volume
+                "total_policies": int(len(grp)),
+                "unique_travelers": int(grp["idpol"].nunique()) if "idpol" in grp.columns else int(len(grp)),
+                # Financials
+                "total_trip_cost": float(grp["tripCost"].sum()) if "tripCost" in grp.columns else 0.0,
+                "avg_trip_cost": float(grp["tripCost"].mean()) if "tripCost" in grp.columns else 0.0,
+                "median_trip_cost": float(grp["tripCost"].median()) if "tripCost" in grp.columns else 0.0,
+                "min_trip_cost": float(grp["tripCost"].min()) if "tripCost" in grp.columns else 0.0,
+                "max_trip_cost": float(grp["tripCost"].max()) if "tripCost" in grp.columns else 0.0,
+                "cost_std": float(grp["tripCost"].std()) if "tripCost" in grp.columns else 0.0,
+                # Segment meta
+                "unique_segments": int(grp["segment"].nunique()) if "segment" in grp.columns else 0,
+                "top_segment": (grp["segment"].mode().iloc[0] if ("segment" in grp.columns and len(grp) > 0 and not grp["segment"].dropna().empty) else pd.NA),
+            }
+
+            # Segment breakdown metrics
+            if "segment" in grp.columns:
+                seg_counts = grp["segment"].value_counts()
+                seg_costs = grp.groupby("segment")["tripCost"].sum() if "tripCost" in grp.columns else pd.Series(dtype=float)
+                for seg in seg_counts.index:
+                    count_val = int(seg_counts[seg])
+                    cost_val = float(seg_costs.get(seg, 0.0)) if not seg_costs.empty else 0.0
+                    avg_cost_val = float(grp.loc[grp["segment"] == seg, "tripCost"].mean()) if "tripCost" in grp.columns else 0.0
+                    # Use safe column names
+                    seg_key = str(seg) if pd.notna(seg) else "NA"
+                    summary[f"segment_{seg_key}_count"] = count_val
+                    summary[f"segment_{seg_key}_cost"] = cost_val
+                    summary[f"segment_{seg_key}_avg_cost"] = avg_cost_val
+
+            results.append(summary)
+
+    if not results:
+        return pd.DataFrame()
+
+    out = pd.DataFrame(results)
+    # Sort for readability
+    out = out.sort_values(["week_start", "country", "zip_code"]).reset_index(drop=True)
+    return out
