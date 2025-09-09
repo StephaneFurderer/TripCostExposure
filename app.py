@@ -212,6 +212,116 @@ def filter_aggregate_data(data, selected_countries, selected_regions):
     
     return filtered_data
 
+def calculate_traveling_metrics(df, period, group_by_segment):
+    """Calculate traveling metrics using same logic as week search"""
+    from exposure_data import classify_country, classify_region
+    
+    # Apply classification
+    df["country_class"] = df["Country"].apply(classify_country)
+    df["region_class"] = df["ZipCode"].apply(classify_region)
+    
+    # Calculate per-night cost
+    df["perNight"] = (df["tripCost"] / df["nightsCount"].replace(0, pd.NA)).fillna(0.0)
+    
+    records = []
+    
+    if period == "week":
+        # Process all weeks in the data
+        all_dates = pd.concat([df["dateDepart"], df["dateReturn"]]).dropna()
+        min_date = all_dates.min()
+        max_date = all_dates.max()
+        
+        current_week = min_date - pd.to_timedelta(min_date.weekday(), unit="D")
+        
+        while current_week <= max_date:
+            week_end = current_week + pd.to_timedelta(6, unit="D")
+            
+            # Find policies traveling during this week (same logic as week search)
+            traveling_mask = (df["dateDepart"] <= week_end) & (df["dateReturn"] > current_week)
+            traveling_policies = df[traveling_mask]
+            
+            if len(traveling_policies) > 0:
+                # Calculate nights in week (same logic as week search)
+                night_range_start = traveling_policies["dateDepart"]
+                night_range_end = traveling_policies["dateReturn"] - pd.to_timedelta(1, unit="D")
+                overlap_start = night_range_start.where(night_range_start > current_week, current_week)
+                overlap_end = night_range_end.where(night_range_end < week_end, week_end)
+                delta = (overlap_end - overlap_start).dt.days + 1
+                traveling_policies["nightsInWeek"] = delta.clip(lower=0).fillna(0).astype(int)
+                traveling_policies["remainingTripCost"] = (traveling_policies["nightsInWeek"] * traveling_policies["perNight"]).round(2)
+                
+                # Calculate normalized x-axis value
+                x_norm = pd.Timestamp(2000, 1, 3) + pd.to_timedelta((current_week.isocalendar().week - 1) * 7, unit="D")
+                year = current_week.year
+                
+                # Group by country_class and region_class
+                groupby_cols = ["country_class", "region_class"]
+                if group_by_segment and "segment" in traveling_policies.columns:
+                    groupby_cols.append("segment")
+                
+                for group_vals, group_df in traveling_policies.groupby(groupby_cols, dropna=False):
+                    if not isinstance(group_vals, tuple):
+                        group_vals = (group_vals,)
+                    
+                    # Aggregate metrics (same as week search)
+                    volume = len(group_df)
+                    maxTripCostExposure = group_df["tripCost"].sum()
+                    tripCostPerNightExposure = group_df["remainingTripCost"].sum()
+                    avgTripCostPerNight = group_df["perNight"].mean()
+                    
+                    # Extract values
+                    country_class = group_vals[0] if len(group_vals) > 0 else "null"
+                    region_class = group_vals[1] if len(group_vals) > 1 else "Other"
+                    extra_vals = list(group_vals[2:]) if len(group_vals) > 2 else []
+                    
+                    record = [year, x_norm, country_class, region_class, volume, maxTripCostExposure, tripCostPerNightExposure, avgTripCostPerNight] + extra_vals
+                    records.append(record)
+            
+            current_week += pd.to_timedelta(7, unit="D")
+    
+    # Convert to DataFrame
+    cols = ["year", "x", "country_class", "region_class", "volume", "maxTripCostExposure", "tripCostPerNightExposure", "avgTripCostPerNight"]
+    if group_by_segment and "segment" in df.columns:
+        cols.append("segment")
+    
+    result_df = pd.DataFrame(records, columns=cols)
+    return result_df
+
+def calculate_departures_metrics(df, period, group_by_segment):
+    """Calculate departures metrics using same logic as week search"""
+    from exposure_data import classify_country, classify_region
+    
+    # Apply classification
+    df["country_class"] = df["Country"].apply(classify_country)
+    df["region_class"] = df["ZipCode"].apply(classify_region)
+    
+    # Calculate per-night cost
+    df["perNight"] = (df["tripCost"] / df["nightsCount"].replace(0, pd.NA)).fillna(0.0)
+    
+    if period == "week":
+        # Group by departure week
+        df["depart_week"] = df["dateDepart"].dt.to_period('W')
+        df["x"] = df["dateDepart"].dt.to_period('W').dt.start_time
+        df["year"] = df["dateDepart"].dt.year
+        
+        # Normalize x to 2000
+        df["x"] = pd.Timestamp(2000, 1, 3) + pd.to_timedelta((df["x"].dt.isocalendar().week - 1) * 7, unit="D")
+        
+        group_cols = ["year", "x", "country_class", "region_class"]
+        if group_by_segment and "segment" in df.columns:
+            group_cols.append("segment")
+        
+        result_df = df.groupby(group_cols, as_index=False).agg(
+            volume=("tripCost", "count"),
+            maxTripCostExposure=("tripCost", "sum"),
+            avgTripCostPerNight=("perNight", "mean"),
+            tripCostPerNightExposure=("perNight", "sum"),
+        )
+        
+        return result_df
+    
+    return pd.DataFrame()
+
 # Unified metric selector based on mode
 if metric_mode == "Traveling":
     metric_options = ["volume", "maxTripCostExposure", "tripCostPerNightExposure", "avgTripCostPerNight"]
@@ -224,10 +334,66 @@ selected_metric = st.selectbox("Metric to plot", options=metric_options, index=d
 # Main display panel
 ## plot the trip cost exposure by departure year per day, week or month
 
-# Use precomputed data if available, otherwise compute from raw data
-if precomputed_data is not None:
-    # Use precomputed data and apply filters
-    filtered_data = filter_aggregate_data(precomputed_data, selected_countries, selected_regions)
+# ALWAYS use raw data calculation (same as week search) instead of precomputed data
+# This ensures consistency between plot and search methods
+
+# Load raw data
+if use_dummy_data:
+    # Load dummy data
+    df = get_data(use_dummy_data, selected_folder, erase_cache)
+else:
+    # Load real data from combined.parquet
+    if selected_folder:
+        combined_path = os.path.join(selected_folder, "combined.parquet")
+        if os.path.exists(combined_path):
+            df = pd.read_parquet(combined_path)
+            # Ensure datetime types
+            for c in ["dateDepart", "dateReturn", "dateApp"]:
+                if c in df.columns:
+                    df[c] = pd.to_datetime(df[c], errors="coerce")
+
+# Apply country filter to raw data
+if df is not None and not df.empty:
+    # Create country filter mask
+    country_mask = pd.Series(False, index=df.index)
+    
+    if "US" in selected_countries:
+        country_mask |= (df['Country'] == 'US')
+    if "ROW" in selected_countries:
+        # ROW includes all countries that are not US and not null
+        country_mask |= ((df['Country'] != 'US') & (df['Country'].notna()))
+    if "null" in selected_countries:
+        country_mask |= df['Country'].isna()
+    
+    # Apply the filter
+    df = df[country_mask].copy()
+    
+    # Show filter summary
+    st.sidebar.caption(f"📊 Showing {len(df):,} policies after country filtering")
+
+# Calculate plot data using same logic as week search
+if df is not None and not df.empty:
+    # Import classification functions
+    from exposure_data import classify_country, classify_region
+    
+    # Apply country and region classification
+    df_classified = df.copy()
+    df_classified["country_class"] = df_classified["Country"].apply(classify_country)
+    df_classified["region_class"] = df_classified["ZipCode"].apply(classify_region)
+    
+    # Apply region filter
+    region_mask = pd.Series(False, index=df_classified.index)
+    for region in selected_regions:
+        region_mask |= (df_classified['region_class'] == region)
+    df_classified = df_classified[region_mask].copy()
+    
+    # Calculate metrics using week search logic
+    if metric_mode == "Traveling":
+        # Calculate traveling metrics using same logic as week search
+        filtered_data = calculate_traveling_metrics(df_classified, period, group_by_segment)
+    else:
+        # Calculate departures metrics
+        filtered_data = calculate_departures_metrics(df_classified, period, group_by_segment)
     
     # Show filter summary
     if not filtered_data.empty:
@@ -238,6 +404,9 @@ if precomputed_data is not None:
         segments = sorted(filtered_data["segment"].dropna().astype(str).unique().tolist())
         selected_segments = st.multiselect("Select segments", segments, default=segments)
         filtered_data = filtered_data[filtered_data["segment"].astype(str).isin(selected_segments)]
+else:
+    st.error("No data available for plotting")
+    filtered_data = pd.DataFrame()
     
     # DEBUG: Compare W1 and W2 2024 calculations between plot data and week search
     st.markdown("---")
@@ -470,18 +639,10 @@ if precomputed_data is not None:
     # Show what the plot data contains for W2 - RECALCULATE using same logic as raw data
     st.write("**Plot Data Method Calculation for W2 2024 (RECALCULATED):**")
     
-    # Recalculate W2 2024 using the same logic as raw data aggregation
+    # Recalculate W2 2024 using the EXACT SAME data as raw data aggregation
     if not raw_w2_2024.empty:
-        # Apply the same filters as the plot data
-        plot_raw_w2_2024 = raw_w2_2024_classified.copy()
-        
-        # Apply country filter if selected
-        if selected_countries and "All" not in selected_countries:
-            plot_raw_w2_2024 = plot_raw_w2_2024[plot_raw_w2_2024["country_class"].isin(selected_countries)]
-        
-        # Apply region filter if selected  
-        if selected_regions and "All" not in selected_regions:
-            plot_raw_w2_2024 = plot_raw_w2_2024[plot_raw_w2_2024["region_class"].isin(selected_regions)]
+        # Use the EXACT SAME filtered data as the raw data aggregation above
+        plot_raw_w2_2024 = filtered_raw_w2_2024.copy()  # Use the same data source!
         
         if not plot_raw_w2_2024.empty:
             # Calculate the same metrics as the raw data aggregation
