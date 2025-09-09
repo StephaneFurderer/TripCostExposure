@@ -288,6 +288,7 @@ def simple_forecast_fallback(historical_data, weeks_ahead=26, selected_segment=N
 def analyze_departure_patterns(historical_df, selected_segment=None, max_depart_weeks=52):
     """
     Analyze historical departure patterns by looking at same week ±1 week from previous year
+    Includes trip length and per-night cost analysis for accurate forecasting
     
     Parameters:
     - historical_df: DataFrame with historical purchase and departure data
@@ -295,7 +296,7 @@ def analyze_departure_patterns(historical_df, selected_segment=None, max_depart_
     - max_depart_weeks: Maximum weeks ahead to analyze departure patterns
     
     Returns:
-    - DataFrame with departure distribution patterns
+    - DataFrame with departure distribution patterns including trip metrics
     """
     if historical_df.empty or 'dateDepart' not in historical_df.columns:
         return pd.DataFrame()
@@ -312,12 +313,25 @@ def analyze_departure_patterns(historical_df, selected_segment=None, max_depart_
     # Ensure date columns are datetime
     df['dateApp'] = pd.to_datetime(df['dateApp'], errors='coerce')
     df['dateDepart'] = pd.to_datetime(df['dateDepart'], errors='coerce')
+    df['dateReturn'] = pd.to_datetime(df['dateReturn'], errors='coerce')
     
-    # Calculate weeks between purchase and departure
+    # Calculate trip metrics
     df['weeks_to_depart'] = ((df['dateDepart'] - df['dateApp']).dt.days / 7).round().astype(int)
+    df['trip_length_days'] = (df['dateReturn'] - df['dateDepart']).dt.days
+    
+    # Calculate per-night cost if tripCost is available
+    if 'tripCost' in df.columns:
+        df['trip_cost_per_night'] = df['tripCost'] / df['trip_length_days'].replace(0, 1)  # Avoid division by zero
+    else:
+        df['trip_cost_per_night'] = 0
     
     # Filter out invalid data
-    df = df[(df['weeks_to_depart'] >= 0) & (df['weeks_to_depart'] <= max_depart_weeks)]
+    df = df[
+        (df['weeks_to_depart'] >= 0) & 
+        (df['weeks_to_depart'] <= max_depart_weeks) &
+        (df['trip_length_days'] > 0) &
+        (df['trip_length_days'] <= 365)  # Reasonable trip length limit
+    ]
     
     if df.empty:
         return pd.DataFrame()
@@ -353,11 +367,29 @@ def analyze_departure_patterns(historical_df, selected_segment=None, max_depart_
         # Get departure distribution from previous year's similar period
         prev_departure_dist = prev_year_data['weeks_to_depart'].value_counts().sort_index()
         
+        # Calculate trip metrics by weeks_to_depart for previous year data
+        trip_metrics_by_weeks = {}
+        for weeks_ahead in prev_departure_dist.index:
+            weeks_data = prev_year_data[prev_year_data['weeks_to_depart'] == weeks_ahead]
+            if len(weeks_data) > 0:
+                avg_trip_length = weeks_data['trip_length_days'].mean()
+                avg_cost_per_night = weeks_data['trip_cost_per_night'].mean()
+                trip_metrics_by_weeks[weeks_ahead] = {
+                    'avg_trip_length_days': avg_trip_length,
+                    'avg_cost_per_night': avg_cost_per_night
+                }
+        
         # Normalize to get proportions
         departure_proportions = {}
         for weeks_ahead, count in prev_departure_dist.items():
             proportion = count / len(prev_year_data)
-            departure_proportions[weeks_ahead] = proportion
+            departure_proportions[weeks_ahead] = {
+                'proportion': proportion,
+                'trip_metrics': trip_metrics_by_weeks.get(weeks_ahead, {
+                    'avg_trip_length_days': 7,  # Default fallback
+                    'avg_cost_per_night': 100   # Default fallback
+                })
+            }
         
         departure_patterns.append({
             'purchase_week': purchase_week.start_time,
@@ -370,6 +402,7 @@ def analyze_departure_patterns(historical_df, selected_segment=None, max_depart_
 def create_departure_forecast(purchase_forecast, departure_patterns, selected_segment=None):
     """
     Create departure forecast based on purchase forecast and historical patterns
+    Includes trip length and per-night cost calculations
     
     Parameters:
     - purchase_forecast: DataFrame with weekly purchase forecasts
@@ -377,7 +410,7 @@ def create_departure_forecast(purchase_forecast, departure_patterns, selected_se
     - selected_segment: Segment being forecasted
     
     Returns:
-    - DataFrame with departure forecasts by week
+    - DataFrame with departure forecasts by week including trip metrics
     """
     if purchase_forecast.empty or departure_patterns.empty:
         return pd.DataFrame()
@@ -398,34 +431,100 @@ def create_departure_forecast(purchase_forecast, departure_patterns, selected_se
             # Use average pattern if no exact match
             avg_distribution = {}
             for _, pattern in departure_patterns.iterrows():
-                for weeks_ahead, proportion in pattern['departure_distribution'].items():
+                for weeks_ahead, data in pattern['departure_distribution'].items():
                     if weeks_ahead not in avg_distribution:
-                        avg_distribution[weeks_ahead] = []
-                    avg_distribution[weeks_ahead].append(proportion)
+                        avg_distribution[weeks_ahead] = {
+                            'proportions': [],
+                            'trip_lengths': [],
+                            'costs_per_night': []
+                        }
+                    avg_distribution[weeks_ahead]['proportions'].append(data['proportion'])
+                    avg_distribution[weeks_ahead]['trip_lengths'].append(data['trip_metrics']['avg_trip_length_days'])
+                    avg_distribution[weeks_ahead]['costs_per_night'].append(data['trip_metrics']['avg_cost_per_night'])
             
-            # Calculate average proportions
+            # Calculate average proportions and metrics
             for weeks_ahead in avg_distribution:
-                avg_distribution[weeks_ahead] = sum(avg_distribution[weeks_ahead]) / len(avg_distribution[weeks_ahead])
+                avg_distribution[weeks_ahead] = {
+                    'proportion': sum(avg_distribution[weeks_ahead]['proportions']) / len(avg_distribution[weeks_ahead]['proportions']),
+                    'trip_metrics': {
+                        'avg_trip_length_days': sum(avg_distribution[weeks_ahead]['trip_lengths']) / len(avg_distribution[weeks_ahead]['trip_lengths']),
+                        'avg_cost_per_night': sum(avg_distribution[weeks_ahead]['costs_per_night']) / len(avg_distribution[weeks_ahead]['costs_per_night'])
+                    }
+                }
         else:
             # Use the first matching pattern
             avg_distribution = matching_patterns.iloc[0]['departure_distribution']
         
         # Apply distribution to forecasted policy volume
-        for weeks_ahead, proportion in avg_distribution.items():
+        for weeks_ahead, data in avg_distribution.items():
             depart_week = purchase_week + pd.Timedelta(weeks=weeks_ahead)
-            depart_volume = int(policy_volume * proportion)
+            depart_volume = int(policy_volume * data['proportion'])
             
             if depart_volume > 0:
+                # Calculate trip metrics
+                avg_trip_length = data['trip_metrics']['avg_trip_length_days']
+                avg_cost_per_night = data['trip_metrics']['avg_cost_per_night']
+                total_trip_cost = depart_volume * avg_trip_length * avg_cost_per_night
+                
+                # Calculate return date (handles decimal trip lengths)
+                # Ensure trip length is valid and convert to float
+                trip_length_days = float(avg_trip_length) if pd.notna(avg_trip_length) and avg_trip_length > 0 else 7.0
+                return_week = depart_week + pd.Timedelta(days=trip_length_days)
+                
                 departure_forecast.append({
                     'purchase_week': purchase_week,
                     'depart_week': depart_week,
+                    'return_week': return_week,
                     'weeks_to_depart': weeks_ahead,
                     'policy_volume': depart_volume,
+                    'avg_trip_length_days': round(avg_trip_length, 1),
+                    'avg_cost_per_night': round(avg_cost_per_night, 2),
+                    'total_trip_cost': round(total_trip_cost, 2),
                     'segment': selected_segment or 'all',
                     'forecast_type': 'departure_forecast'
                 })
     
     return pd.DataFrame(departure_forecast)
+
+def calculate_traveling_policies_by_week(departure_forecast_df, start_date, end_date):
+    """
+    Calculate traveling policies for each week in the forecast period
+    
+    Parameters:
+    - departure_forecast_df: DataFrame with departure forecasts including return_week
+    - start_date: Start date for the analysis period
+    - end_date: End date for the analysis period
+    
+    Returns:
+    - DataFrame with weekly traveling policy counts
+    """
+    if departure_forecast_df.empty:
+        return pd.DataFrame()
+    
+    # Generate all weeks in the period
+    weeks = pd.date_range(start=start_date, end=end_date, freq='W-MON')
+    
+    traveling_by_week = []
+    
+    for week in weeks:
+        # Policies that departed before or during this week and return after this week
+        traveling_policies = departure_forecast_df[
+            (departure_forecast_df['depart_week'] <= week) & 
+            (departure_forecast_df['return_week'] > week)
+        ]
+        
+        total_traveling = traveling_policies['policy_volume'].sum()
+        total_trip_cost = traveling_policies['total_trip_cost'].sum()
+        
+        traveling_by_week.append({
+            'week': week,
+            'traveling_policies': total_traveling,
+            'total_trip_cost': total_trip_cost,
+            'avg_trip_length': traveling_policies['avg_trip_length_days'].mean() if len(traveling_policies) > 0 else 0,
+            'avg_cost_per_night': traveling_policies['avg_cost_per_night'].mean() if len(traveling_policies) > 0 else 0
+        })
+    
+    return pd.DataFrame(traveling_by_week)
 
 def simple_forecast(historical_data, weeks_ahead=26, folder_path=None, selected_segment=None):
     """Main forecasting function - tries external CSV first, falls back to simple trend"""
@@ -582,6 +681,14 @@ if folder_path:
     if not departure_patterns.empty:
         departure_forecast_df = create_departure_forecast(forecast_df, departure_patterns, selected_segment)
     
+    # Calculate traveling policies by week
+    traveling_by_week_df = pd.DataFrame()
+    if not departure_forecast_df.empty:
+        # Get the forecast period
+        forecast_start = forecast_df['week_purchased'].min()
+        forecast_end = departure_forecast_df['return_week'].max()
+        traveling_by_week_df = calculate_traveling_policies_by_week(departure_forecast_df, forecast_start, forecast_end)
+    
     st.success(f"✅ Generated forecast for {len(forecast_df)} weeks")
     
     # Display forecast results
@@ -670,7 +777,18 @@ if folder_path:
         with col3:
             st.metric("Peak Departure Week", f"{departure_weekly['policy_volume'].max():,}")
         with col4:
+            st.metric("Total Trip Cost", f"${departure_forecast_df['total_trip_cost'].sum():,.0f}")
+        
+        # Additional trip metrics
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Avg Trip Length", f"{departure_forecast_df['avg_trip_length_days'].mean():.1f} days")
+        with col2:
+            st.metric("Avg Cost/Night", f"${departure_forecast_df['avg_cost_per_night'].mean():.0f}")
+        with col3:
             st.metric("Forecast Period", f"{departure_weekly['depart_week'].min().strftime('%Y-%m-%d')} to {departure_weekly['depart_week'].max().strftime('%Y-%m-%d')}")
+        with col4:
+            st.metric("Total Nights", f"{departure_forecast_df['policy_volume'].sum() * departure_forecast_df['avg_trip_length_days'].mean():,.0f}")
         
         # Departure forecast chart
         fig_departure = go.Figure()
@@ -692,12 +810,99 @@ if folder_path:
         
         st.plotly_chart(fig_departure, use_container_width=True)
         
+        # Trip cost forecast chart
+        departure_cost_weekly = departure_forecast_df.groupby('depart_week').agg({
+            'total_trip_cost': 'sum'
+        }).reset_index()
+        departure_cost_weekly = departure_cost_weekly.sort_values('depart_week')
+        
+        fig_cost = go.Figure()
+        fig_cost.add_trace(go.Scatter(
+            x=departure_cost_weekly['depart_week'],
+            y=departure_cost_weekly['total_trip_cost'],
+            mode='lines+markers',
+            name='Trip Cost Forecast',
+            line=dict(color='orange', width=2)
+        ))
+        
+        fig_cost.update_layout(
+            title=f"Trip Cost Forecast - {selected_segment or 'All Segments'}",
+            xaxis_title="Departure Week",
+            yaxis_title="Total Trip Cost ($)",
+            hovermode='x unified',
+            legend=dict(x=0.02, y=0.98)
+        )
+        
+        st.plotly_chart(fig_cost, use_container_width=True)
+        
+        # Traveling policies analysis
+        if not traveling_by_week_df.empty:
+            st.subheader("✈️ Traveling Policies by Week")
+            
+            # Traveling policies summary
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Peak Traveling Week", f"{traveling_by_week_df['traveling_policies'].max():,}")
+            with col2:
+                st.metric("Avg Traveling Policies", f"{traveling_by_week_df['traveling_policies'].mean():.0f}")
+            with col3:
+                st.metric("Total Traveling Cost", f"${traveling_by_week_df['total_trip_cost'].sum():,.0f}")
+            with col4:
+                st.metric("Peak Traveling Cost", f"${traveling_by_week_df['total_trip_cost'].max():,.0f}")
+            
+            # Traveling policies chart
+            fig_traveling = go.Figure()
+            fig_traveling.add_trace(go.Scatter(
+                x=traveling_by_week_df['week'],
+                y=traveling_by_week_df['traveling_policies'],
+                mode='lines+markers',
+                name='Traveling Policies',
+                line=dict(color='purple', width=2)
+            ))
+            
+            fig_traveling.update_layout(
+                title=f"Traveling Policies by Week - {selected_segment or 'All Segments'}",
+                xaxis_title="Week",
+                yaxis_title="Number of Traveling Policies",
+                hovermode='x unified',
+                legend=dict(x=0.02, y=0.98)
+            )
+            
+            st.plotly_chart(fig_traveling, use_container_width=True)
+            
+            # Traveling policies cost chart
+            fig_traveling_cost = go.Figure()
+            fig_traveling_cost.add_trace(go.Scatter(
+                x=traveling_by_week_df['week'],
+                y=traveling_by_week_df['total_trip_cost'],
+                mode='lines+markers',
+                name='Traveling Trip Cost',
+                line=dict(color='brown', width=2)
+            ))
+            
+            fig_traveling_cost.update_layout(
+                title=f"Traveling Trip Cost by Week - {selected_segment or 'All Segments'}",
+                xaxis_title="Week",
+                yaxis_title="Total Trip Cost ($)",
+                hovermode='x unified',
+                legend=dict(x=0.02, y=0.98)
+            )
+            
+            st.plotly_chart(fig_traveling_cost, use_container_width=True)
+            
+            # Traveling policies table
+            st.subheader("📋 Traveling Policies by Week")
+            st.dataframe(traveling_by_week_df, use_container_width=True)
+        
         # Departure distribution analysis
         st.subheader("📊 Departure Distribution Analysis")
         
-        # Show distribution by weeks to depart
+        # Show distribution by weeks to depart with trip metrics
         depart_dist = departure_forecast_df.groupby('weeks_to_depart').agg({
-            'policy_volume': 'sum'
+            'policy_volume': 'sum',
+            'avg_trip_length_days': 'mean',
+            'avg_cost_per_night': 'mean',
+            'total_trip_cost': 'sum'
         }).reset_index()
         depart_dist['proportion'] = depart_dist['policy_volume'] / depart_dist['policy_volume'].sum()
         
@@ -715,12 +920,23 @@ if folder_path:
             st.plotly_chart(fig_dist, use_container_width=True)
         
         with col2:
-            # Distribution table
-            st.subheader("Distribution Summary")
-            st.dataframe(
-                depart_dist[['weeks_to_depart', 'policy_volume', 'proportion']].round(3),
-                use_container_width=True
+            # Trip length distribution
+            fig_length = px.bar(
+                depart_dist, 
+                x='weeks_to_depart', 
+                y='avg_trip_length_days',
+                title="Average Trip Length by Weeks to Depart",
+                labels={'avg_trip_length_days': 'Avg Trip Length (days)', 'weeks_to_depart': 'Weeks to Depart'}
             )
+            st.plotly_chart(fig_length, use_container_width=True)
+        
+        # Distribution table with trip metrics
+        st.subheader("Distribution Summary with Trip Metrics")
+        display_cols = ['weeks_to_depart', 'policy_volume', 'proportion', 'avg_trip_length_days', 'avg_cost_per_night', 'total_trip_cost']
+        st.dataframe(
+            depart_dist[display_cols].round(3),
+            use_container_width=True
+        )
         
         # Detailed departure forecast table
         st.subheader("📋 Detailed Departure Forecast")
