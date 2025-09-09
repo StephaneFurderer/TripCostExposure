@@ -597,6 +597,106 @@ def calculate_traveling_policies_by_week(departure_forecast_df, start_date, end_
     
     return traveling_df
 
+def create_forecast_weekly_data(departure_forecast_df, selected_segment=None):
+    """
+    Create forecast data in the same format as historical analysis
+    with ISO week, year, policy volume, and max trip cost exposure
+    
+    Parameters:
+    - departure_forecast_df: DataFrame with departure forecasts
+    - selected_segment: Segment being forecasted
+    
+    Returns:
+    - DataFrame with weekly forecast data in historical format
+    """
+    if departure_forecast_df.empty:
+        return pd.DataFrame()
+    
+    # Group by depart_week and calculate metrics
+    weekly_forecast = departure_forecast_df.groupby('depart_week').agg({
+        'policy_volume': 'sum',
+        'total_trip_cost': 'sum',
+        'avg_trip_length_days': 'mean',
+        'avg_cost_per_night': 'mean'
+    }).reset_index()
+    
+    # Add ISO week and year columns
+    weekly_forecast['iso_week'] = weekly_forecast['depart_week'].dt.isocalendar().week
+    weekly_forecast['year'] = weekly_forecast['depart_week'].dt.isocalendar().year
+    
+    # Calculate max trip cost exposure (total trip cost for the week)
+    weekly_forecast['max_trip_cost_exposure'] = weekly_forecast['total_trip_cost']
+    
+    # Add segment column
+    weekly_forecast['segment'] = selected_segment or 'all'
+    
+    # Select relevant columns to match historical format
+    result_columns = ['depart_week', 'iso_week', 'year', 'policy_volume', 'max_trip_cost_exposure', 'segment']
+    return weekly_forecast[result_columns]
+
+def create_forecast_charts(forecast_weekly_data, selected_segment=None):
+    """
+    Create forecast charts matching the historical analysis format
+    
+    Parameters:
+    - forecast_weekly_data: DataFrame with weekly forecast data
+    - selected_segment: Segment being forecasted
+    """
+    if forecast_weekly_data.empty:
+        return
+    
+    # Create normalized x-axis for plotting (same as historical)
+    forecast_weekly_data['x_norm'] = forecast_weekly_data['iso_week']
+    
+    # Group by year for plotting
+    years = sorted(forecast_weekly_data['year'].unique())
+    
+    # Create policy volume chart
+    fig_volume = go.Figure()
+    
+    for year in years:
+        year_data = forecast_weekly_data[forecast_weekly_data['year'] == year]
+        fig_volume.add_trace(go.Scatter(
+            x=year_data['x_norm'],
+            y=year_data['policy_volume'],
+            mode='lines+markers',
+            name=f'Forecast {year}',
+            line=dict(width=2)
+        ))
+    
+    fig_volume.update_layout(
+        title=f"Forecast Policy Volume by ISO Week - {selected_segment or 'All Segments'}",
+        xaxis_title="ISO Week",
+        yaxis_title="Policy Volume",
+        hovermode='x unified',
+        legend=dict(x=0.02, y=0.98)
+    )
+    
+    st.plotly_chart(fig_volume, use_container_width=True)
+    
+    # Create max trip cost exposure chart
+    fig_cost = go.Figure()
+    
+    for year in years:
+        year_data = forecast_weekly_data[forecast_weekly_data['year'] == year]
+        fig_cost.add_trace(go.Scatter(
+            x=year_data['x_norm'],
+            y=year_data['max_trip_cost_exposure'],
+            mode='lines+markers',
+            name=f'Forecast {year}',
+            line=dict(width=2)
+        ))
+    
+    fig_cost.update_layout(
+        title=f"Forecast Max Trip Cost Exposure by ISO Week - {selected_segment or 'All Segments'}",
+        xaxis_title="ISO Week",
+        yaxis_title="Max Trip Cost Exposure ($)",
+        hovermode='x unified',
+        legend=dict(x=0.02, y=0.98)
+    )
+    
+    st.plotly_chart(fig_cost, use_container_width=True)
+
 def simple_forecast(historical_data, weeks_ahead=26, folder_path=None, selected_segment=None):
     """Main forecasting function - tries external CSV first, falls back to simple trend"""
     if historical_data.empty:
@@ -1008,6 +1108,42 @@ if folder_path:
             depart_dist[display_cols].round(3),
             use_container_width=True
         )
+        
+        # Forecast by ISO Week and Year (matching historical format)
+        st.subheader("📊 Forecast by ISO Week and Year")
+        
+        # Create forecast data in historical format
+        forecast_weekly_data = create_forecast_weekly_data(departure_forecast_df, selected_segment)
+        
+        if not forecast_weekly_data.empty:
+            # Create pivot table for policy volume
+            pivot_volume = forecast_weekly_data.pivot_table(
+                index='iso_week', 
+                columns='year', 
+                values='policy_volume', 
+                fill_value=0
+            ).round(0)
+            
+            # Create pivot table for max trip cost exposure
+            pivot_cost = forecast_weekly_data.pivot_table(
+                index='iso_week', 
+                columns='year', 
+                values='max_trip_cost_exposure', 
+                fill_value=0
+            ).round(0)
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.subheader("Policy Volume by ISO Week")
+                st.dataframe(pivot_volume, use_container_width=True)
+            
+            with col2:
+                st.subheader("Max Trip Cost Exposure by ISO Week")
+                st.dataframe(pivot_cost, use_container_width=True)
+            
+            # Create forecast charts matching historical format
+            create_forecast_charts(forecast_weekly_data, selected_segment)
         
         # Detailed departure forecast table
         st.subheader("📋 Detailed Departure Forecast")
