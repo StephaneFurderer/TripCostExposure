@@ -450,6 +450,9 @@ if folder_path and folder_path.exists():
                 # Create normalized week visualization similar to historical page
                 plot_data = traveling_by_week_df.copy()
                 
+                # Sort by week to ensure proper ordering
+                plot_data = plot_data.sort_values('week')
+                
                 # Normalize weeks to year 2000 (same as historical page)
                 plot_data['x'] = plot_data['week'].dt.to_period('W-MON').dt.start_time
                 plot_data['x'] = plot_data['x'].apply(lambda x: x.replace(year=2000))
