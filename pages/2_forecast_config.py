@@ -284,55 +284,6 @@ def generate_trip_cost_forecast(historical_trip_costs, start_forecast_week, week
     return pd.DataFrame(forecast_data)
 
 
-def generate_policy_volume_forecast(historical_policy_data, start_forecast_week, weeks_ahead=104):
-    """
-    Generate policy volume forecast using average of available years
-    
-    Parameters:
-    - historical_policy_data: DataFrame with historical policy volume data
-    - start_forecast_week: Global start date for all forecasts
-    - weeks_ahead: Number of weeks to forecast
-    
-    Returns:
-    - DataFrame with forecast data
-    """
-    if historical_policy_data.empty:
-        return pd.DataFrame()
-    
-    # Get available years from historical data
-    available_years = sorted(historical_policy_data['iso_year'].unique())
-    st.sidebar.info(f"Available years for policy volume forecast: {available_years}")
-    
-    # Calculate average policy volume for each ISO week across available years
-    seasonal_pattern = historical_policy_data.groupby('iso_week')['policy_volume'].mean().reset_index()
-    seasonal_pattern.columns = ['iso_week', 'policy_volume']
-    
-    # Generate future weeks from global start date
-    future_weeks = pd.date_range(
-        start=start_forecast_week + pd.Timedelta(weeks=1), 
-        periods=weeks_ahead, 
-        freq='W-MON'
-    )
-    
-    forecast_data = []
-    for week in future_weeks:
-        iso_week = week.isocalendar().week
-        iso_year = week.isocalendar().year
-        
-        # Get the average policy volume for this ISO week
-        avg_volume = seasonal_pattern[seasonal_pattern['iso_week'] == iso_week]['policy_volume'].iloc[0] if not seasonal_pattern[seasonal_pattern['iso_week'] == iso_week].empty else seasonal_pattern['policy_volume'].mean()
-        
-        forecast_data.append({
-            'week_start': week,
-            'policy_volume': max(0, round(avg_volume)),  # Ensure non-negative integer
-            'iso_week': iso_week,
-            'iso_year': iso_year,
-            'is_forecast': True
-        })
-    
-    return pd.DataFrame(forecast_data)
-
-
 def analyze_traveling_patterns_by_cohort(historical_df, selected_segment=None, folder_path=None):
     """
     Analyze traveling patterns by purchase week cohort using historical data
@@ -688,73 +639,71 @@ if folder_path and folder_path.exists():
                 st.warning("No trip cost data available for analysis")
             
             # Policy Volume Historical + Forecast
-            if not weekly_purchases.empty:
+            if not weekly_purchases.empty and not forecast_df.empty:
                 st.subheader("📈 Policy Volume Historical + Forecast")
                 
-                # Generate policy volume forecast using seasonal patterns
-                policy_volume_forecast = generate_policy_volume_forecast(weekly_purchases, start_forecast_week, weeks_ahead=104)
+                # Use the existing CSV forecast data
+                # Add forecast flag to distinguish historical vs forecast
+                weekly_purchases['is_forecast'] = False
+                forecast_df['is_forecast'] = True
                 
                 # Combine historical and forecast data
-                if not policy_volume_forecast.empty:
-                    # Add forecast flag
-                    weekly_purchases['is_forecast'] = False
-                    policy_volume_forecast['is_forecast'] = True
-                    
-                    # Combine data
-                    combined_policy_data = pd.concat([weekly_purchases, policy_volume_forecast], ignore_index=True)
-                    
-                    # Create the plot
-                    fig = px.line(
-                        combined_policy_data,
-                        x='iso_week',
-                        y='policy_volume',
-                        color='iso_year',
-                        line_dash='is_forecast',
-                        color_discrete_sequence=px.colors.qualitative.Safe,
-                        labels={'iso_week': 'ISO Week', 'policy_volume': 'Policy Volume', 'iso_year': 'ISO Year'},
-                    )
-                    
-                    # Configure x-axis ticks for ISO weeks
-                    tickvals = list(range(1, 53, 4))  # W1, W5, W9, W13, etc.
-                    ticktext = [f"W{w}" for w in tickvals]
-                    fig.update_xaxes(tickmode="array", tickvals=tickvals, ticktext=ticktext)
-                    
-                    fig.update_layout(
-                        title="Policy Volume Historical + 104-Week Forecast",
-                        legend_title_text="ISO Year",
-                        hovermode="x unified"
-                    )
-                    
-                    st.plotly_chart(fig, use_container_width=True)
-                    
-                    # Data table
-                    st.dataframe(combined_policy_data, use_container_width=True)
-                else:
-                    # Fallback to historical only if forecast fails
-                    fig = px.line(
-                        weekly_purchases,
-                        x='iso_week',
-                        y='policy_volume',
-                        color='iso_year',
-                        color_discrete_sequence=px.colors.qualitative.Safe,
-                        labels={'iso_week': 'ISO Week', 'policy_volume': 'Policy Volume', 'iso_year': 'ISO Year'},
-                    )
-                    
-                    # Configure x-axis ticks for ISO weeks
-                    tickvals = list(range(1, 53, 4))  # W1, W5, W9, W13, etc.
-                    ticktext = [f"W{w}" for w in tickvals]
-                    fig.update_xaxes(tickmode="array", tickvals=tickvals, ticktext=ticktext)
-                    
-                    fig.update_layout(
-                        title="Policy Volume Historical",
-                        legend_title_text="ISO Year",
-                        hovermode="x unified"
-                    )
-                    
-                    st.plotly_chart(fig, use_container_width=True)
-                    
-                    # Data table
-                    st.dataframe(weekly_purchases, use_container_width=True)
+                combined_policy_data = pd.concat([weekly_purchases, forecast_df], ignore_index=True)
+                
+                # Create the plot
+                fig = px.line(
+                    combined_policy_data,
+                    x='iso_week',
+                    y='policy_volume',
+                    color='iso_year',
+                    line_dash='is_forecast',
+                    color_discrete_sequence=px.colors.qualitative.Safe,
+                    labels={'iso_week': 'ISO Week', 'policy_volume': 'Policy Volume', 'iso_year': 'ISO Year'},
+                )
+                
+                # Configure x-axis ticks for ISO weeks
+                tickvals = list(range(1, 53, 4))  # W1, W5, W9, W13, etc.
+                ticktext = [f"W{w}" for w in tickvals]
+                fig.update_xaxes(tickmode="array", tickvals=tickvals, ticktext=ticktext)
+                
+                fig.update_layout(
+                    title="Policy Volume Historical + CSV Forecast",
+                    legend_title_text="ISO Year",
+                    hovermode="x unified"
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Data table
+                st.dataframe(combined_policy_data, use_container_width=True)
+            elif not weekly_purchases.empty:
+                # Show historical only if no forecast available
+                st.subheader("📈 Policy Volume Historical")
+                
+                fig = px.line(
+                    weekly_purchases,
+                    x='iso_week',
+                    y='policy_volume',
+                    color='iso_year',
+                    color_discrete_sequence=px.colors.qualitative.Safe,
+                    labels={'iso_week': 'ISO Week', 'policy_volume': 'Policy Volume', 'iso_year': 'ISO Year'},
+                )
+                
+                # Configure x-axis ticks for ISO weeks
+                tickvals = list(range(1, 53, 4))  # W1, W5, W9, W13, etc.
+                ticktext = [f"W{w}" for w in tickvals]
+                fig.update_xaxes(tickmode="array", tickvals=tickvals, ticktext=ticktext)
+                
+                fig.update_layout(
+                    title="Policy Volume Historical",
+                    legend_title_text="ISO Year",
+                    hovermode="x unified"
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Data table
+                st.dataframe(weekly_purchases, use_container_width=True)
             else:
                 st.warning("No policy volume data available for analysis")
             
