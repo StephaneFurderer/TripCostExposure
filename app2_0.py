@@ -263,36 +263,41 @@ if precomputed_data is not None:
     fig.update_layout(legend_title_text="Departure Year", hovermode="x unified")
     
     # Add vertical lines for extraction date and holidays
-    extraction_date = get_extraction_date(folder_path)
-    if extraction_date and period == "week":
-        # Convert extraction date to normalized x coordinate
-        extraction_week = extraction_date.isocalendar().week
-        extraction_x = pd.Timestamp(2000, 1, 3) + pd.Timedelta(days=(extraction_week - 1) * 7)
-        
-        fig.add_vline(
-            x=extraction_x,
-            line_dash="solid",
-            line_color="red",
-            annotation_text=f"Extraction Week {extraction_week}",
-            annotation_position="top"
-        )
-    
-    # Add holiday lines
     if period == "week":
+        # Add extraction date line
+        extraction_date = get_extraction_date(folder_path)
+        if extraction_date:
+            # Use ISO week number directly (since x is now ISO week numbers)
+            extraction_week = extraction_date.isocalendar().week
+            extraction_year = extraction_date.isocalendar()[0]
+            
+            # Only add line if the extraction year is in our data
+            if extraction_year in years:
+                fig.add_vline(
+                    x=extraction_week,
+                    line_dash="solid",
+                    line_color="red",
+                    annotation_text=f"Extraction W{extraction_week}",
+                    annotation_position="top"
+                )
+        
+        # Add holiday lines
         holidays = get_us_holidays(years)
         for holiday_date, holiday_name in holidays:
             holiday_week = holiday_date.isocalendar().week
-            holiday_x = pd.Timestamp(2000, 1, 3) + pd.Timedelta(days=(holiday_week - 1) * 7)
+            holiday_year = holiday_date.isocalendar()[0]
             
-            fig.add_vline(
-                x=holiday_x,
-                line_dash="dash",
-                line_color="gray",
-                opacity=0.6,
-                annotation_text=holiday_name,
-                annotation_position="top",
-                annotation_font_size=8
-            )
+            # Only add line if the holiday year is in our data
+            if holiday_year in years:
+                fig.add_vline(
+                    x=holiday_week,
+                    line_dash="dash",
+                    line_color="gray",
+                    opacity=0.6,
+                    annotation_text=holiday_name,
+                    annotation_position="top",
+                    annotation_font_size=8
+                )
     
     st.plotly_chart(fig, use_container_width=True)
     
