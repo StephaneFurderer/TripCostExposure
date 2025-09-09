@@ -205,6 +205,19 @@ def normalize_policies_df(df: pd.DataFrame) -> pd.DataFrame:
     # Keep segment as plain string (per requirements)
     if "segment" in df.columns:
         df["segment"] = _string_clean(df["segment"]).astype("string")
+    
+    # Handle Country column with case-insensitive matching
+    if "Country" not in df.columns:
+        # search common variants case-insensitively
+        lower_cols = {c.lower(): c for c in df.columns}
+        candidate = None
+        for key in ["country", "country_code", "nation"]:
+            if key in lower_cols:
+                candidate = lower_cols[key]
+                break
+        if candidate is not None:
+            df["Country"] = df[candidate]
+    
     if "Country" in df.columns:
         df["Country"] = _string_clean(df["Country"]).astype("string")
 
