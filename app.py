@@ -403,6 +403,68 @@ fig.update_layout(legend_title_text="Departure Year", hovermode="x unified")
 
 st.plotly_chart(fig, use_container_width=True)
 
+# Second plot: Chronological time series
+st.markdown("---")
+st.subheader("Chronological Time Series (No Normalization)")
+
+# Create chronological plot data
+if not plot_data.empty:
+    # Create a copy for chronological plotting
+    chrono_data = plot_data.copy()
+    
+    # For traveling data, we need to convert back to actual dates
+    if metric_mode == "Traveling":
+        # Convert normalized x back to actual dates
+        # The normalized x is set to 2000, so we need to extract the week and apply to actual year
+        chrono_data["actual_date"] = chrono_data.apply(lambda row: 
+            pd.Timestamp(f"{row['year']}-01-01") + 
+            pd.to_timedelta((row['x'].isocalendar().week - 1) * 7, unit="D"), axis=1)
+    else:
+        # For departures, x is already the departure date
+        chrono_data["actual_date"] = chrono_data["x"]
+    
+    # Create chronological plot
+    if group_by_segment and "segment" in chrono_data.columns:
+        fig_chrono = px.line(
+            chrono_data,
+            x="actual_date",
+            y=ycol,
+            color="year",
+            facet_row="segment",
+            color_discrete_sequence=px.colors.qualitative.Safe,
+            category_orders={"year": years},
+            labels={"actual_date": "Date", ycol: ycol, "year": "Year", "segment": "Segment"},
+        )
+    else:
+        fig_chrono = px.line(
+            chrono_data,
+            x="actual_date",
+            y=ycol,
+            color="year",
+            color_discrete_sequence=px.colors.qualitative.Safe,
+            category_orders={"year": years},
+            labels={"actual_date": "Date", ycol: ycol, "year": "Year"},
+        )
+    
+    # Configure x-axis for chronological display
+    fig_chrono.update_xaxes(
+        tickformat="%Y-%m-%d",
+        tickangle=45
+    )
+    
+    fig_chrono.update_layout(
+        legend_title_text="Departure Year", 
+        hovermode="x unified",
+        xaxis_title="Date"
+    )
+    
+    st.plotly_chart(fig_chrono, use_container_width=True)
+    
+    # Show some info about the chronological data
+    st.caption(f"Showing {len(chrono_data)} data points from {chrono_data['actual_date'].min().date()} to {chrono_data['actual_date'].max().date()}")
+else:
+    st.info("No data available for chronological plot")
+
 # Data table below the plot
 st.markdown("---")
 st.subheader("Data Table: Metric by ISO Week and Year")
