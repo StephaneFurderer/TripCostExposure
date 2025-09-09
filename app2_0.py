@@ -4,6 +4,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from pathlib import Path
 import os
+from datetime import datetime
 
 def filter_aggregate_data(data, selected_countries, selected_regions):
     """Filter aggregate data based on country and region selections"""
@@ -29,6 +30,62 @@ def filter_aggregate_data(data, selected_countries, selected_regions):
     filtered_data = data[combined_mask].copy()
     
     return filtered_data
+
+def get_extraction_date(folder_path):
+    """Extract the extraction date from folder structure"""
+    if folder_path is None:
+        return None
+    
+    folder_name = folder_path.name
+    # Try to parse folder name as date (format: YYYY-MM-DD or similar)
+    try:
+        # Handle various date formats in folder names
+        if len(folder_name) >= 8 and folder_name[:8].replace('-', '').replace('_', '').isdigit():
+            date_part = folder_name[:10]  # Take first 10 chars for YYYY-MM-DD
+            return pd.to_datetime(date_part, errors='coerce')
+    except:
+        pass
+    
+    # Fallback: use the most recent file modification time
+    try:
+        parquet_files = list(folder_path.glob("*.parquet"))
+        if parquet_files:
+            most_recent = max(parquet_files, key=lambda f: f.stat().st_mtime)
+            return pd.to_datetime(datetime.fromtimestamp(most_recent.stat().st_mtime))
+    except:
+        pass
+    
+    return None
+
+def get_us_holidays(years):
+    """Get major US holidays for given years"""
+    holidays = []
+    
+    for year in years:
+        # Fixed date holidays
+        holidays.extend([
+            (pd.Timestamp(f"{year}-01-01"), "New Year's Day"),
+            (pd.Timestamp(f"{year}-07-04"), "Independence Day"),
+            (pd.Timestamp(f"{year}-12-25"), "Christmas Day"),
+        ])
+        
+        # Memorial Day (last Monday in May)
+        may_last = pd.Timestamp(f"{year}-05-31")
+        memorial_day = may_last - pd.to_timedelta(may_last.weekday(), unit='D')
+        holidays.append((memorial_day, "Memorial Day"))
+        
+        # Labor Day (first Monday in September)  
+        sep_first = pd.Timestamp(f"{year}-09-01")
+        labor_day = sep_first + pd.to_timedelta((7 - sep_first.weekday()) % 7, unit='D')
+        holidays.append((labor_day, "Labor Day"))
+        
+        # Thanksgiving (fourth Thursday in November)
+        nov_first = pd.Timestamp(f"{year}-11-01")
+        first_thursday = nov_first + pd.to_timedelta((3 - nov_first.weekday()) % 7, unit='D')
+        thanksgiving = first_thursday + pd.to_timedelta(21, unit='D')  # Add 3 weeks
+        holidays.append((thanksgiving, "Thanksgiving"))
+    
+    return holidays
 
 def load_week_search_df(selected_folder):
     """Load raw data for week search functionality"""
@@ -204,6 +261,38 @@ if precomputed_data is not None:
         fig.update_xaxes(tickmode="array", tickvals=tickvals, ticktext=ticktext)
     
     fig.update_layout(legend_title_text="Departure Year", hovermode="x unified")
+    
+    # Add vertical lines for extraction date and holidays
+    extraction_date = get_extraction_date(folder_path)
+    if extraction_date and period == "week":
+        # Convert extraction date to normalized x coordinate
+        extraction_week = extraction_date.isocalendar().week
+        extraction_x = pd.Timestamp(2000, 1, 3) + pd.to_timedelta((extraction_week - 1) * 7, unit="D")
+        
+        fig.add_vline(
+            x=extraction_x,
+            line_dash="solid",
+            line_color="red",
+            annotation_text=f"Extraction Week {extraction_week}",
+            annotation_position="top"
+        )
+    
+    # Add holiday lines
+    if period == "week":
+        holidays = get_us_holidays(years)
+        for holiday_date, holiday_name in holidays:
+            holiday_week = holiday_date.isocalendar().week
+            holiday_x = pd.Timestamp(2000, 1, 3) + pd.to_timedelta((holiday_week - 1) * 7, unit="D")
+            
+            fig.add_vline(
+                x=holiday_x,
+                line_dash="dash",
+                line_color="gray",
+                opacity=0.6,
+                annotation_text=holiday_name,
+                annotation_position="top",
+                annotation_font_size=8
+            )
     
     st.plotly_chart(fig, use_container_width=True)
     
