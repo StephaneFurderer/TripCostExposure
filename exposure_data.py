@@ -1020,8 +1020,8 @@ def precompute_all_with_timing(folder_path: str) -> pd.DataFrame:
 
     tasks = []
     for kind in ["travel", "depart"]:
-        for period in ["day", "week", "month"]:
-            for by_segment in [False, True if "segment" in df.columns else False]:
+        for period in ["day", "week"]:
+            for by_segment in [True if "segment" in df.columns else False]:
                 if by_segment is False:
                     tasks.append((kind, period, False))
                 elif by_segment is True:
