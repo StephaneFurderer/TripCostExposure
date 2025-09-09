@@ -145,7 +145,7 @@ def convert_monthly_to_weekly_forecast(monthly_forecast, historical_data, start_
             current_week += timedelta(weeks=1)
         
         # Filter to only future weeks for actual forecast
-        future_weeks_in_month = [week for week in all_weeks_in_month if week >= last_week + timedelta(weeks=1)]
+        future_weeks_in_month = [week for week in all_weeks_in_month if week >= last_week]
         
         # Distribute monthly policy count across ALL weeks in month, but only forecast future weeks
         if all_weeks_in_month and future_weeks_in_month:
@@ -560,7 +560,7 @@ if folder_path and folder_path.exists():
         
         # Define global forecast start week
         weekly_purchases = aggregate_weekly_purchases(historical_df, selected_countries, selected_regions)
-        start_forecast_week = weekly_purchases['week_start'].max() + pd.Timedelta(weeks=1)
+        start_forecast_week = CONFIG['start_forecast_week'] if CONFIG['start_forecast_week'] is not None else weekly_purchases['week_start'].max() + pd.Timedelta(weeks=1)
         st.sidebar.info(f"📅 Global forecast start week: {start_forecast_week.strftime('%Y-%m-%d')}")
         
         # Generate forecast
