@@ -151,7 +151,15 @@ if use_dummy_data:
     folder_path = Path("_data")
 else:
     if selected_folder:
-        folder_path = Path(selected_folder)
+        # Look for date subfolder in the selected folder
+        folder_contents = [f for f in Path(selected_folder).iterdir() if f.is_dir() and f.name[0].isdigit()]
+        if folder_contents:
+            # Use the most recent date folder
+            folder_path = sorted(folder_contents)[-1]
+        else:
+            folder_path = Path(selected_folder)
+    else:
+        folder_path = None
 
 # Load precomputed data if available
 if folder_path:
