@@ -317,10 +317,6 @@ if precomputed_data is not None:
         if selected_regions and "All" not in selected_regions:
             filtered_raw_w1_2024 = filtered_raw_w1_2024[filtered_raw_w1_2024["region_class"].isin(selected_regions)]
         
-        # Apply segment filter if selected
-        if selected_segments and "All" not in selected_segments:
-            filtered_raw_w1_2024 = filtered_raw_w1_2024[filtered_raw_w1_2024["segment"].astype(str).isin(selected_segments)]
-        
         st.write(f"After applying filters: {len(filtered_raw_w1_2024)} policies (from {len(raw_w1_2024_classified)} original)")
         
         # Now aggregate the filtered raw data the same way as plot data
@@ -433,10 +429,6 @@ if precomputed_data is not None:
         if selected_regions and "All" not in selected_regions:
             filtered_raw_w2_2024 = filtered_raw_w2_2024[filtered_raw_w2_2024["region_class"].isin(selected_regions)]
         
-        # Apply segment filter if selected
-        if selected_segments and "All" not in selected_segments:
-            filtered_raw_w2_2024 = filtered_raw_w2_2024[filtered_raw_w2_2024["segment"].astype(str).isin(selected_segments)]
-        
         st.write(f"After applying filters: {len(filtered_raw_w2_2024)} policies (from {len(raw_w2_2024_classified)} original)")
         
         # Now aggregate the filtered raw W2 data the same way as plot data
@@ -490,10 +482,6 @@ if precomputed_data is not None:
         # Apply region filter if selected  
         if selected_regions and "All" not in selected_regions:
             plot_raw_w2_2024 = plot_raw_w2_2024[plot_raw_w2_2024["region_class"].isin(selected_regions)]
-        
-        # Apply segment filter if selected
-        if selected_segments and "All" not in selected_segments:
-            plot_raw_w2_2024 = plot_raw_w2_2024[plot_raw_w2_2024["segment"].astype(str).isin(selected_segments)]
         
         if not plot_raw_w2_2024.empty:
             # Calculate the same metrics as the raw data aggregation
