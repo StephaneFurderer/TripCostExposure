@@ -88,8 +88,18 @@ def convert_monthly_to_weekly_forecast(monthly_forecast, historical_data, start_
     if monthly_forecast.empty or historical_data.empty:
         return pd.DataFrame()
     
-    # Use global forecast start week
-    last_week = start_forecast_week
+    # Use the last observed date from historical data, not the global start date
+    last_observed_date = historical_data['week_start'].max()
+    
+    # Find the next Monday after the last observed date
+    # If last date is already a Monday, we want the following Monday
+    if last_observed_date.weekday() == 0:  # Monday
+        next_monday = last_observed_date + pd.Timedelta(weeks=1)
+    else:
+        next_monday = last_observed_date + pd.Timedelta(days=(7 - last_observed_date.weekday()))
+    
+    # Use the next Monday as the forecast start
+    last_week = next_monday
     
     forecast_data = []
     model_point_id = 1
@@ -150,6 +160,7 @@ def convert_monthly_to_weekly_forecast(monthly_forecast, historical_data, start_
                     forecast_data.append({
                         'model_point_id': model_point_id,
                         'week_purchased': week,
+                        'week_start': week,  # Add week_start column for consistency
                         'policy_volume': volume,
                         'iso_week': week.isocalendar().week,
                         'iso_year': week.isocalendar().year,
