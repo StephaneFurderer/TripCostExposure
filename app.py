@@ -4,215 +4,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from pathlib import Path
 import os
-from exposure_data import get_data, classify_country, classify_region
-
-# Page config
-st.set_page_config(page_title="Trip Cost Exposure Analysis", layout="wide")
-
-# Sidebar controls for data source
-with st.sidebar:
-    st.header("Data Source")
-    use_dummy_data = st.checkbox("Use dummy data", value=True, help="Toggle to use packaged sample dataset")
-    
-    # Country filter
-    country_filter_options = ["US", "ROW", "null"]
-    selected_countries = st.multiselect(
-        "Country Filter",
-        options=country_filter_options,
-        default=country_filter_options,
-        help="US: United States, ROW: Rest of World, null: Missing country data"
-    )
-    
-    # Region filter
-    region_filter_options = ["Atlantic", "Florida", "Gulf", "Pacific", "Other"]
-    selected_regions = st.multiselect(
-        "Region Filter",
-        options=region_filter_options,
-        default=region_filter_options,
-        help="Filter by US coastal regions"
-    )
-    
-    # Real data folder selection
-    if not use_dummy_data:
-        selected_folder = st.selectbox("Select data folder", [""] + [f.name for f in Path(".").iterdir() if f.is_dir() and not f.name.startswith(".")])
-    else:
-        selected_folder = None
-
-# UI Controls
-group_by_segment = st.checkbox("Group by Segment", value=False)
-period = st.selectbox("Time Period", ["day", "week", "month"], index=1)
-metric_mode = st.radio("Mode", ["Traveling", "Departures"], index=0)
-year_order_choice = st.selectbox("Departure Year order", options=["Ascending", "Descending"], index=0)
-
-# Try to load precomputed aggregates first
-precomputed_data = None
-folder_path = None
-
-# Determine folder path for precomputed data
-if use_dummy_data:
-    folder_path = Path("_data")
-else:
-    if selected_folder:
-        folder_path = Path(selected_folder)
-
-# Load precomputed data if available
-if folder_path:
-    if metric_mode == "Traveling":
-        if period == "day":
-            agg_file = folder_path / "agg_travel_day_by_segment.parquet"
-        else:
-            agg_file = folder_path / f"agg_travel_{period}_by_segment.parquet"
-    else:
-        agg_file = folder_path / f"agg_depart_{period}_by_segment.parquet"
-    
-    if agg_file.exists():
-        precomputed_data = pd.read_parquet(agg_file)
-        st.sidebar.success(f"✅ Loaded precomputed {period} {metric_mode.lower()} data")
-        
-        # If user doesn't want segment grouping, aggregate the segment data
-        if not group_by_segment and "segment" in precomputed_data.columns:
-            group_cols = ["year", "x", "country_class", "region_class"]
-            agg_dict = {}
-            for col in ["volume", "maxTripCostExposure", "tripCostPerNightExposure", "avgTripCostPerNight"]:
-                if col in precomputed_data.columns:
-                    if col == "avgTripCostPerNight":
-                        agg_dict[col] = "mean"
-                    else:
-                        agg_dict[col] = "sum"
-            
-            precomputed_data = precomputed_data.groupby(group_cols, as_index=False).agg(agg_dict)
-            st.sidebar.info("📊 Aggregated segment data to show 'all' view")
-    else:
-        st.sidebar.warning(f"⚠️ Precomputed {period} {metric_mode.lower()} data not found, will compute from raw data")
-
-# Fallback to raw data if no precomputed data available
-df = None
-if precomputed_data is None:
-    if use_dummy_data:
-        df = get_data(use_dummy_data, selected_folder, False)
-    else:
-        if selected_folder:
-            combined_path = os.path.join(selected_folder, "combined.parquet")
-            if os.path.exists(combined_path):
-                df = pd.read_parquet(combined_path)
-                for c in ["dateDepart", "dateReturn", "dateApp"]:
-                    if c in df.columns:
-                        df[c] = pd.to_datetime(df[c], errors="coerce")
-
-def filter_aggregate_data(data, selected_countries, selected_regions):
-    """Filter aggregate data based on country and region selections"""
-    if data is None or data.empty:
-        return data
-    
-    # Apply country filter
-    country_mask = pd.Series(False, index=data.index)
-    if "US" in selected_countries:
-        country_mask |= (data['country_class'] == 'US')
-    if "ROW" in selected_countries:
-        country_mask |= (data['country_class'] == 'ROW')
-    if "null" in selected_countries:
-        country_mask |= (data['country_class'] == 'null')
-    
-    # Apply region filter
-    region_mask = pd.Series(False, index=data.index)
-    for region in selected_regions:
-        region_mask |= (data['region_class'] == region)
-    
-    # Combine filters
-    combined_mask = country_mask & region_mask
-    filtered_data = data[combined_mask].copy()
-    
-    return filtered_data
-
-# Unified metric selector
-if metric_mode == "Traveling":
-    metric_options = ["volume", "maxTripCostExposure", "tripCostPerNightExposure", "avgTripCostPerNight"]
-    default_idx = 1
-else:
-    metric_options = ["volume", "maxTripCostExposure", "tripCostPerNightExposure", "avgTripCostPerNight"]
-    default_idx = 1
-
-selected_metric = st.selectbox("Metric to plot", options=metric_options, index=default_idx)
-
-# Main display panel
-st.header("Trip Cost Exposure Analysis")
-
-# Use precomputed data for performance, with fallback to raw data calculation
-if precomputed_data is not None:
-    # Use precomputed data and apply filters (FAST)
-    filtered_data = filter_aggregate_data(precomputed_data, selected_countries, selected_regions)
-    
-    # Show filter summary
-    if not filtered_data.empty:
-        st.sidebar.caption(f"📈 Showing {len(filtered_data):,} records after filtering")
-    
-    # Handle segment filtering if needed
-    if group_by_segment and "segment" in filtered_data.columns:
-        segments = sorted(filtered_data["segment"].dropna().astype(str).unique().tolist())
-        selected_segments = st.multiselect("Select segments", segments, default=segments)
-        filtered_data = filtered_data[filtered_data["segment"].astype(str).isin(selected_segments)]
-else:
-    # Fallback to raw data calculation if no precomputed data
-    st.warning("⚠️ No precomputed data found. Using raw data calculation (slower).")
-    
-    # Load raw data
-    if use_dummy_data:
-        df = get_data(use_dummy_data, selected_folder, False)
-    else:
-        if selected_folder:
-            combined_path = os.path.join(selected_folder, "combined.parquet")
-            if os.path.exists(combined_path):
-                df = pd.read_parquet(combined_path)
-                for c in ["dateDepart", "dateReturn", "dateApp"]:
-                    if c in df.columns:
-                        df[c] = pd.to_datetime(df[c], errors="coerce")
-    
-    # Apply country filter to raw data
-    if df is not None and not df.empty:
-        country_mask = pd.Series(False, index=df.index)
-        
-        if "US" in selected_countries:
-            country_mask |= (df['Country'] == 'US')
-        if "ROW" in selected_countries:
-            country_mask |= ((df['Country'] != 'US') & (df['Country'].notna()))
-        if "null" in selected_countries:
-            country_mask |= df['Country'].isna()
-        
-        df = df[country_mask].copy()
-        st.sidebar.caption(f"📊 Showing {len(df):,} policies after country filtering")
-    
-    # Calculate plot data using raw data calculation
-    if df is not None and not df.empty:
-        # Apply country and region classification
-        df["country_class"] = df["Country"].apply(classify_country)
-        df["region_class"] = df["ZipCode"].apply(classify_region)
-        
-        # Apply region filter
-        region_mask = pd.Series(False, index=df.index)
-        for region in selected_regions:
-            region_mask |= (df['region_class'] == region)
-        df = df[region_mask].copy()
-        
-        # Calculate metrics using raw data calculation
-        if metric_mode == "Traveling":
-            # Calculate traveling metrics using raw data
-            filtered_data = calculate_traveling_metrics(df, period, group_by_segment)
-        else:
-            # Calculate departures metrics using raw data
-            filtered_data = calculate_departures_metrics(df, period, group_by_segment)
-        
-        # Show filter summary
-        if not filtered_data.empty:
-            st.sidebar.caption(f"📈 Showing {len(filtered_data):,} records after filtering")
-        
-        # Handle segment filtering if needed
-        if group_by_segment and "segment" in filtered_data.columns:
-            segments = sorted(filtered_data["segment"].dropna().astype(str).unique().tolist())
-            selected_segments = st.multiselect("Select segments", segments, default=segments)
-            filtered_data = filtered_data[filtered_data["segment"].astype(str).isin(selected_segments)]
-    else:
-        st.error("No data available for plotting")
-        filtered_data = pd.DataFrame()
+from exposure_data import load_folder_policies, classify_country, classify_region
 
 def calculate_traveling_metrics(df, period, group_by_segment):
     """Calculate traveling metrics using raw data"""
@@ -311,6 +103,214 @@ def calculate_departures_metrics(df, period, group_by_segment):
         return result_df
     
     return pd.DataFrame()
+
+# Page config
+st.set_page_config(page_title="Trip Cost Exposure Analysis", layout="wide")
+
+# Sidebar controls for data source
+with st.sidebar:
+    st.header("Data Source")
+    use_dummy_data = st.checkbox("Use dummy data", value=True, help="Toggle to use packaged sample dataset")
+    
+    # Country filter
+    country_filter_options = ["US", "ROW", "null"]
+    selected_countries = st.multiselect(
+        "Country Filter",
+        options=country_filter_options,
+        default=country_filter_options,
+        help="US: United States, ROW: Rest of World, null: Missing country data"
+    )
+    
+    # Region filter
+    region_filter_options = ["Atlantic", "Florida", "Gulf", "Pacific", "Other"]
+    selected_regions = st.multiselect(
+        "Region Filter",
+        options=region_filter_options,
+        default=region_filter_options,
+        help="Filter by US coastal regions"
+    )
+    
+    # Real data folder selection
+    if not use_dummy_data:
+        selected_folder = st.selectbox("Select data folder", [""] + [f.name for f in Path(".").iterdir() if f.is_dir() and not f.name.startswith(".")])
+    else:
+        selected_folder = None
+
+# UI Controls
+group_by_segment = st.checkbox("Group by Segment", value=False)
+period = st.selectbox("Time Period", ["day", "week", "month"], index=1)
+metric_mode = st.radio("Mode", ["Traveling", "Departures"], index=0)
+year_order_choice = st.selectbox("Departure Year order", options=["Ascending", "Descending"], index=0)
+
+# Try to load precomputed aggregates first
+precomputed_data = None
+folder_path = None
+
+# Determine folder path for precomputed data
+if use_dummy_data:
+    folder_path = Path("_data")
+else:
+    if selected_folder:
+        folder_path = Path(selected_folder)
+
+# Load precomputed data if available
+if folder_path:
+    if metric_mode == "Traveling":
+        if period == "day":
+            agg_file = folder_path / "agg_travel_day_by_segment.parquet"
+        else:
+            agg_file = folder_path / f"agg_travel_{period}_by_segment.parquet"
+    else:
+        agg_file = folder_path / f"agg_depart_{period}_by_segment.parquet"
+    
+    if agg_file.exists():
+        precomputed_data = pd.read_parquet(agg_file)
+        st.sidebar.success(f"✅ Loaded precomputed {period} {metric_mode.lower()} data")
+        
+        # If user doesn't want segment grouping, aggregate the segment data
+        if not group_by_segment and "segment" in precomputed_data.columns:
+            group_cols = ["year", "x", "country_class", "region_class"]
+            agg_dict = {}
+            for col in ["volume", "maxTripCostExposure", "tripCostPerNightExposure", "avgTripCostPerNight"]:
+                if col in precomputed_data.columns:
+                    if col == "avgTripCostPerNight":
+                        agg_dict[col] = "mean"
+                    else:
+                        agg_dict[col] = "sum"
+            
+            precomputed_data = precomputed_data.groupby(group_cols, as_index=False).agg(agg_dict)
+            st.sidebar.info("📊 Aggregated segment data to show 'all' view")
+    else:
+        st.sidebar.warning(f"⚠️ Precomputed {period} {metric_mode.lower()} data not found, will compute from raw data")
+
+# Fallback to raw data if no precomputed data available
+df = None
+if precomputed_data is None:
+    if use_dummy_data:
+        df = load_folder_policies("_data", force_rebuild=False, erase_cache=False)
+    else:
+        if selected_folder:
+            combined_path = os.path.join(selected_folder, "combined.parquet")
+            if os.path.exists(combined_path):
+                df = pd.read_parquet(combined_path)
+                for c in ["dateDepart", "dateReturn", "dateApp"]:
+                    if c in df.columns:
+                        df[c] = pd.to_datetime(df[c], errors="coerce")
+
+def filter_aggregate_data(data, selected_countries, selected_regions):
+    """Filter aggregate data based on country and region selections"""
+    if data is None or data.empty:
+        return data
+    
+    # Apply country filter
+    country_mask = pd.Series(False, index=data.index)
+    if "US" in selected_countries:
+        country_mask |= (data['country_class'] == 'US')
+    if "ROW" in selected_countries:
+        country_mask |= (data['country_class'] == 'ROW')
+    if "null" in selected_countries:
+        country_mask |= (data['country_class'] == 'null')
+    
+    # Apply region filter
+    region_mask = pd.Series(False, index=data.index)
+    for region in selected_regions:
+        region_mask |= (data['region_class'] == region)
+    
+    # Combine filters
+    combined_mask = country_mask & region_mask
+    filtered_data = data[combined_mask].copy()
+    
+    return filtered_data
+
+# Unified metric selector
+if metric_mode == "Traveling":
+    metric_options = ["volume", "maxTripCostExposure", "tripCostPerNightExposure", "avgTripCostPerNight"]
+    default_idx = 1
+else:
+    metric_options = ["volume", "maxTripCostExposure", "tripCostPerNightExposure", "avgTripCostPerNight"]
+    default_idx = 1
+
+selected_metric = st.selectbox("Metric to plot", options=metric_options, index=default_idx)
+
+# Main display panel
+st.header("Trip Cost Exposure Analysis")
+
+# Use precomputed data for performance, with fallback to raw data calculation
+if precomputed_data is not None:
+    # Use precomputed data and apply filters (FAST)
+    filtered_data = filter_aggregate_data(precomputed_data, selected_countries, selected_regions)
+    
+    # Show filter summary
+    if not filtered_data.empty:
+        st.sidebar.caption(f"📈 Showing {len(filtered_data):,} records after filtering")
+    
+    # Handle segment filtering if needed
+    if group_by_segment and "segment" in filtered_data.columns:
+        segments = sorted(filtered_data["segment"].dropna().astype(str).unique().tolist())
+        selected_segments = st.multiselect("Select segments", segments, default=segments)
+        filtered_data = filtered_data[filtered_data["segment"].astype(str).isin(selected_segments)]
+else:
+    # Fallback to raw data calculation if no precomputed data
+    st.warning("⚠️ No precomputed data found. Using raw data calculation (slower).")
+    
+    # Load raw data
+    if use_dummy_data:
+        df = load_folder_policies("_data", force_rebuild=False, erase_cache=False)
+    else:
+        if selected_folder:
+            combined_path = os.path.join(selected_folder, "combined.parquet")
+            if os.path.exists(combined_path):
+                df = pd.read_parquet(combined_path)
+                for c in ["dateDepart", "dateReturn", "dateApp"]:
+                    if c in df.columns:
+                        df[c] = pd.to_datetime(df[c], errors="coerce")
+    
+    # Apply country filter to raw data
+    if df is not None and not df.empty:
+        country_mask = pd.Series(False, index=df.index)
+        
+        if "US" in selected_countries:
+            country_mask |= (df['Country'] == 'US')
+        if "ROW" in selected_countries:
+            country_mask |= ((df['Country'] != 'US') & (df['Country'].notna()))
+        if "null" in selected_countries:
+            country_mask |= df['Country'].isna()
+        
+        df = df[country_mask].copy()
+        st.sidebar.caption(f"📊 Showing {len(df):,} policies after country filtering")
+    
+    # Calculate plot data using raw data calculation
+    if df is not None and not df.empty:
+        # Apply country and region classification
+        df["country_class"] = df["Country"].apply(classify_country)
+        df["region_class"] = df["ZipCode"].apply(classify_region)
+        
+        # Apply region filter
+        region_mask = pd.Series(False, index=df.index)
+        for region in selected_regions:
+            region_mask |= (df['region_class'] == region)
+        df = df[region_mask].copy()
+        
+        # Calculate metrics using raw data calculation
+        if metric_mode == "Traveling":
+            # Calculate traveling metrics using raw data
+            filtered_data = calculate_traveling_metrics(df, period, group_by_segment)
+        else:
+            # Calculate departures metrics using raw data
+            filtered_data = calculate_departures_metrics(df, period, group_by_segment)
+        
+        # Show filter summary
+        if not filtered_data.empty:
+            st.sidebar.caption(f"📈 Showing {len(filtered_data):,} records after filtering")
+        
+        # Handle segment filtering if needed
+        if group_by_segment and "segment" in filtered_data.columns:
+            segments = sorted(filtered_data["segment"].dropna().astype(str).unique().tolist())
+            selected_segments = st.multiselect("Select segments", segments, default=segments)
+            filtered_data = filtered_data[filtered_data["segment"].astype(str).isin(selected_segments)]
+    else:
+        st.error("No data available for plotting")
+        filtered_data = pd.DataFrame()
 
 # Define years for plot ordering
 years = sorted(filtered_data["year"].unique().tolist())
@@ -440,7 +440,7 @@ st.subheader("Week Search")
 def load_week_search_df():
     """Load data for week search functionality"""
     if use_dummy_data:
-        return get_data(use_dummy_data, selected_folder, False)
+        return load_folder_policies("_data", force_rebuild=False, erase_cache=False)
     else:
         if selected_folder:
             combined_path = os.path.join(selected_folder, "combined.parquet")
