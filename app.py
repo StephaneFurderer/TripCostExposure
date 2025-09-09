@@ -470,8 +470,13 @@ if not week_df.empty:
     with c2:
         sel_week = st.number_input("ISO Week", min_value=1, max_value=53, value=1, step=1)
     
-    # Calculate week dates
-    week_start = pd.Timestamp(f"{sel_year}-W{sel_week:02d}-1", format='%Y-W%W-%w')
+    # Calculate week dates using ISO week logic
+    # Find the first Monday of the year
+    jan_1 = pd.Timestamp(f"{sel_year}-01-01")
+    first_monday = jan_1 + pd.to_timedelta((7 - jan_1.weekday()) % 7, unit="D")
+    
+    # Calculate the start of the requested ISO week
+    week_start = first_monday + pd.to_timedelta((sel_week - 1) * 7, unit="D")
     week_end = week_start + pd.to_timedelta(6, unit="D")
     
     st.write(f"**Week {sel_week}, {sel_year}:** {week_start.date()} to {week_end.date()}")
