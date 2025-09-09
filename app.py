@@ -407,7 +407,110 @@ fig.update_layout(legend_title_text="Departure Year", hovermode="x unified")
 
 st.plotly_chart(fig, use_container_width=True)
 
+# Add data table below the plot for debugging
+st.markdown("---")
+st.subheader("Data Table: Metric by ISO Week and Year")
 
+if 'data' in locals() and not data.empty:
+    # Create a pivot table for better visualization
+    if period == "week":
+        # For weeks, create a table with ISO week numbers
+        data_table = data.copy()
+        
+        # Convert x to ISO week number
+        if 'x' in data_table.columns:
+            # x is normalized to 2000, so we need to extract the week number
+            data_table['iso_week'] = data_table['x'].dt.isocalendar().week
+            data_table['iso_year'] = data_table['x'].dt.year
+        
+        # Create pivot table
+        pivot_cols = ['iso_week', 'iso_year', ycol]
+        if group_by_segment and 'segment' in data_table.columns:
+            pivot_cols.append('segment')
+        
+        # Group by week and year, then pivot
+        if group_by_segment and 'segment' in data_table.columns:
+            # For segmented data, show each segment as separate columns
+            pivot_data = data_table.groupby(['iso_week', 'iso_year', 'segment'])[ycol].sum().reset_index()
+            pivot_table = pivot_data.pivot_table(
+                index='iso_week', 
+                columns=['iso_year', 'segment'], 
+                values=ycol, 
+                fill_value=0
+            )
+        else:
+            # For non-segmented data
+            pivot_data = data_table.groupby(['iso_week', 'iso_year'])[ycol].sum().reset_index()
+            pivot_table = pivot_data.pivot_table(
+                index='iso_week', 
+                columns='iso_year', 
+                values=ycol, 
+                fill_value=0
+            )
+        
+        # Format the table for better readability
+        if not pivot_table.empty:
+            # Round numeric values
+            pivot_table = pivot_table.round(2)
+            
+            # Add total row
+            pivot_table.loc['TOTAL'] = pivot_table.sum()
+            
+            st.dataframe(pivot_table, use_container_width=True)
+            
+            # Show summary statistics
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Total Records", len(data_table))
+            with col2:
+                st.metric("Total Value", f"{pivot_table.loc['TOTAL'].sum():,.2f}")
+            with col3:
+                st.metric("Weeks Covered", len(pivot_table.index) - 1)  # -1 for TOTAL row
+        else:
+            st.info("No data available for the selected filters.")
+    
+    elif period == "month":
+        # For months, show month names
+        data_table = data.copy()
+        
+        if 'x' in data_table.columns:
+            data_table['month'] = data_table['x'].dt.month
+            data_table['month_name'] = data_table['x'].dt.strftime('%b')
+            data_table['year'] = data_table['x'].dt.year
+        
+        # Create pivot table
+        if group_by_segment and 'segment' in data_table.columns:
+            pivot_data = data_table.groupby(['month', 'month_name', 'year', 'segment'])[ycol].sum().reset_index()
+            pivot_table = pivot_data.pivot_table(
+                index=['month', 'month_name'], 
+                columns=['year', 'segment'], 
+                values=ycol, 
+                fill_value=0
+            )
+        else:
+            pivot_data = data_table.groupby(['month', 'month_name', 'year'])[ycol].sum().reset_index()
+            pivot_table = pivot_data.pivot_table(
+                index=['month', 'month_name'], 
+                columns='year', 
+                values=ycol, 
+                fill_value=0
+            )
+        
+        if not pivot_table.empty:
+            pivot_table = pivot_table.round(2)
+            pivot_table.loc['TOTAL'] = pivot_table.sum()
+            st.dataframe(pivot_table, use_container_width=True)
+        else:
+            st.info("No data available for the selected filters.")
+    
+    else:  # day
+        # For days, show a sample of the data
+        st.dataframe(data.head(20), use_container_width=True)
+        if len(data) > 20:
+            st.caption(f"Showing first 20 rows of {len(data)} total records")
+
+else:
+    st.info("No data available to display in table.")
 
 # Search policies traveling during a period
 st.markdown("---")
