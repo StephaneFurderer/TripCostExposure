@@ -6,6 +6,7 @@ from pathlib import Path
 import os
 from datetime import datetime, timedelta
 import numpy as np
+import json
 from exposure_data import load_folder_policies, classify_country, classify_region
 
 def load_historical_purchases(folder_path):
@@ -309,6 +310,11 @@ def analyze_departure_patterns(historical_df, selected_segment=None, max_depart_
         if cache_file.exists():
             try:
                 cached_patterns = pd.read_parquet(cache_file)
+                # Convert JSON strings back to dictionaries
+                if 'departure_distribution' in cached_patterns.columns:
+                    cached_patterns['departure_distribution'] = cached_patterns['departure_distribution'].apply(
+                        lambda x: json.loads(x) if isinstance(x, str) else x
+                    )
                 st.sidebar.success(f"✅ Loaded cached departure patterns for {selected_segment or 'all'}")
                 return cached_patterns
             except Exception as e:
@@ -417,7 +423,15 @@ def analyze_departure_patterns(historical_df, selected_segment=None, max_depart_
         try:
             cache_file = folder_path / f"departure_patterns_{selected_segment or 'all'}.parquet"
             st.sidebar.info(f"💾 Caching to: {cache_file}")
-            patterns_df.to_parquet(cache_file, index=False)
+            
+            # Convert departure_distribution dictionaries to JSON strings for Parquet compatibility
+            patterns_df_cache = patterns_df.copy()
+            if 'departure_distribution' in patterns_df_cache.columns:
+                patterns_df_cache['departure_distribution'] = patterns_df_cache['departure_distribution'].apply(
+                    lambda x: json.dumps(x) if isinstance(x, dict) else x
+                )
+            
+            patterns_df_cache.to_parquet(cache_file, index=False)
             st.sidebar.success(f"✅ Cached departure patterns for {selected_segment or 'all'}")
         except Exception as e:
             st.sidebar.warning(f"⚠️ Could not cache patterns: {e}")
