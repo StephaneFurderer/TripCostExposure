@@ -239,10 +239,80 @@ if precomputed_data is not None:
         selected_segments = st.multiselect("Select segments", segments, default=segments)
         filtered_data = filtered_data[filtered_data["segment"].astype(str).isin(selected_segments)]
     
-    # plot the data for w1 2024
-    filtered_data_w1_2024 = filtered_data[filtered_data["year"] == 2024] & (filtered_data["x"].dt.isocalendar().week == 1)
-    st.write("filtered_data_w1_2024")
+    # DEBUG: Compare W1 2024 calculations between plot data and week search
+    st.markdown("---")
+    st.subheader("🔍 DEBUG: W1 2024 Comparison")
+    
+    # Get W1 2024 from plot data (aggregated)
+    filtered_data_w1_2024 = filtered_data[(filtered_data["year"] == 2024) & (filtered_data["x"].dt.isocalendar().week == 1)]
+    st.write("**Plot Data (Aggregated) for W1 2024:**")
     st.dataframe(filtered_data_w1_2024)
+    
+    # Get raw policies for W1 2024 from combined data
+    combined_data = pd.read_parquet(os.path.join(selected_folder, "combined.parquet"))
+    wk_start = pd.Timestamp("2024-01-01")  # W1 2024 starts Jan 1
+    wk_end = wk_start + pd.to_timedelta(6, unit="D")  # Jan 7
+    
+    # Filter raw policies that overlap with W1 2024
+    mask_overlap = (combined_data["dateDepart"] <= wk_end) & (combined_data["dateReturn"] > wk_start)
+    raw_w1_2024 = combined_data.loc[mask_overlap].copy()
+    
+    st.write(f"**Raw Policies Overlapping W1 2024 ({wk_start.date()} to {wk_end.date()}):**")
+    st.write(f"Found {len(raw_w1_2024)} policies")
+    st.dataframe(raw_w1_2024[["idpol", "segment", "dateDepart", "dateReturn", "tripCost", "nightsCount", "ZipCode", "Country"]].head(20))
+    
+    # Calculate metrics the same way as week search
+    if not raw_w1_2024.empty:
+        raw_w1_2024["perNight"] = (raw_w1_2024["tripCost"] / raw_w1_2024["nightsCount"].replace(0, pd.NA)).fillna(0.0)
+        
+        # Calculate nights in week (same logic as week search)
+        night_range_start = raw_w1_2024["dateDepart"]
+        night_range_end = raw_w1_2024["dateReturn"] - pd.to_timedelta(1, unit="D")
+        overlap_start = night_range_start.where(night_range_start > wk_start, wk_start)
+        overlap_end = night_range_end.where(night_range_end < wk_end, wk_end)
+        delta = (overlap_end - overlap_start).dt.days + 1
+        raw_w1_2024["nightsInWeek"] = delta.clip(lower=0).fillna(0).astype(int)
+        raw_w1_2024["remainingTripCost"] = (raw_w1_2024["nightsInWeek"] * raw_w1_2024["perNight"]).round(2)
+        
+        # Calculate totals
+        total_volume = len(raw_w1_2024)
+        total_max_trip_cost = raw_w1_2024["tripCost"].sum()
+        total_remaining_trip_cost = raw_w1_2024["remainingTripCost"].sum()
+        avg_trip_cost_per_night = raw_w1_2024["perNight"].mean()
+        
+        st.write("**Week Search Method Calculation:**")
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Volume (policies)", total_volume)
+        with col2:
+            st.metric("Max Trip Cost", f"${total_max_trip_cost:,.2f}")
+        with col3:
+            st.metric("Remaining Trip Cost", f"${total_remaining_trip_cost:,.2f}")
+        with col4:
+            st.metric("Avg Trip Cost/Night", f"${avg_trip_cost_per_night:,.2f}")
+    
+    # Show what the plot data contains
+    if not filtered_data_w1_2024.empty:
+        st.write("**Plot Data Method Calculation:**")
+        plot_metrics = {}
+        for col in ["volume", "maxTripCostExposure", "tripCostPerNightExposure", "avgTripCostPerNight"]:
+            if col in filtered_data_w1_2024.columns:
+                plot_metrics[col] = filtered_data_w1_2024[col].sum() if col != "avgTripCostPerNight" else filtered_data_w1_2024[col].mean()
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Volume", f"{plot_metrics.get('volume', 0):,.0f}")
+        with col2:
+            st.metric("Max Trip Cost", f"${plot_metrics.get('maxTripCostExposure', 0):,.2f}")
+        with col3:
+            st.metric("Trip Cost/Night Exposure", f"${plot_metrics.get('tripCostPerNightExposure', 0):,.2f}")
+        with col4:
+            st.metric("Avg Trip Cost/Night", f"${plot_metrics.get('avgTripCostPerNight', 0):,.2f}")
+    else:
+        st.write("**No plot data found for W1 2024**")
+    
+    st.markdown("---")
+
     # Aggregate the filtered data by year and x (time period)
     # Group by year, x, and segment (if present)
     # Note: We don't include country_class and region_class in groupby because
