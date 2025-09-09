@@ -7,6 +7,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import json
 
+
+CONFIG = {"start_forecast_week": pd.Timestamp("2025-09-08")}
+
 st.set_page_config(page_title="Forecast Configuration", page_icon="📊", layout="wide")
 
 def load_historical_purchases(folder_path):
@@ -90,14 +93,14 @@ def convert_monthly_to_weekly_forecast(monthly_forecast, historical_data, start_
         return pd.DataFrame()
     
     # Use the last observed date from historical data, not the global start date
-    last_observed_date = historical_data['week_start'].max()
+    next_monday = CONFIG['start_forecast_week'] if CONFIG['start_forecast_week'] is not None else historical_data['week_start'].max()
     
     # Find the next Monday after the last observed date
     # If last date is already a Monday, we want the following Monday
-    if last_observed_date.weekday() == 0:  # Monday
-        next_monday = last_observed_date + pd.Timedelta(weeks=1)
-    else:
-        next_monday = last_observed_date + pd.Timedelta(days=(7 - last_observed_date.weekday()))
+    # if last_observed_date.weekday() == 0:  # Monday
+    #     next_monday = last_observed_date + pd.Timedelta(weeks=1)
+    # else:
+    #     next_monday = last_observed_date + pd.Timedelta(days=(7 - last_observed_date.weekday()))
     
     # Use the next Monday as the forecast start
     last_week = next_monday
@@ -281,16 +284,18 @@ def generate_trip_cost_forecast(historical_trip_costs, start_forecast_week, week
     
     # Use the last observed date from trip cost data, not the global start date
     last_trip_cost_date = historical_trip_costs['purchase_week'].max()
-    last_iso_week = last_trip_cost_date.isocalendar().week
-    last_iso_year = last_trip_cost_date.isocalendar().year
+    # last_iso_week = last_trip_cost_date.isocalendar().week
+    # last_iso_year = last_trip_cost_date.isocalendar().year
     
-    # Find the next Monday after the last observed date
-    # If last date is already a Monday, we want the following Monday
-    if last_trip_cost_date.weekday() == 0:  # Monday
-        next_monday = last_trip_cost_date + pd.Timedelta(weeks=1)
-    else:
-        next_monday = last_trip_cost_date + pd.Timedelta(days=(7 - last_trip_cost_date.weekday()))
+    # # Find the next Monday after the last observed date
+    # # If last date is already a Monday, we want the following Monday
+    # if last_trip_cost_date.weekday() == 0:  # Monday
+    #     next_monday = last_trip_cost_date + pd.Timedelta(weeks=1)
+    # else:
+    #     next_monday = last_trip_cost_date + pd.Timedelta(days=(7 - last_trip_cost_date.weekday()))
     
+    next_monday = CONFIG['start_forecast_week'] if CONFIG['start_forecast_week'] is not None else historical_trip_costs['purchase_week'].max()
+
     # Generate future weeks from the next Monday
     future_weeks = pd.date_range(
         start=next_monday, 
