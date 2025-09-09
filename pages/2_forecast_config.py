@@ -285,21 +285,34 @@ def simple_forecast_fallback(historical_data, weeks_ahead=26, selected_segment=N
     
     return pd.DataFrame(forecast_data)
 
-def analyze_departure_patterns(historical_df, selected_segment=None, max_depart_weeks=52):
+def analyze_departure_patterns(historical_df, selected_segment=None, max_depart_weeks=52, folder_path=None):
     """
     Analyze historical departure patterns by looking at same week ±1 week from previous year
     Includes trip length and per-night cost analysis for accurate forecasting
+    Caches results to speed up subsequent runs
     
     Parameters:
     - historical_df: DataFrame with historical purchase and departure data
     - selected_segment: Segment to analyze (None for all segments)
     - max_depart_weeks: Maximum weeks ahead to analyze departure patterns
+    - folder_path: Path to data folder for caching results
     
     Returns:
     - DataFrame with departure distribution patterns including trip metrics
     """
     if historical_df.empty or 'dateDepart' not in historical_df.columns:
         return pd.DataFrame()
+    
+    # Check for cached departure patterns
+    if folder_path:
+        cache_file = folder_path / f"departure_patterns_{selected_segment or 'all'}.parquet"
+        if cache_file.exists():
+            try:
+                cached_patterns = pd.read_parquet(cache_file)
+                st.sidebar.success(f"✅ Loaded cached departure patterns for {selected_segment or 'all'}")
+                return cached_patterns
+            except Exception as e:
+                st.sidebar.warning(f"⚠️ Could not load cached patterns: {e}")
     
     # Filter by segment if specified
     if selected_segment and 'segment' in historical_df.columns:
@@ -397,9 +410,20 @@ def analyze_departure_patterns(historical_df, selected_segment=None, max_depart_
             'departure_distribution': departure_proportions
         })
     
-    return pd.DataFrame(departure_patterns)
+    patterns_df = pd.DataFrame(departure_patterns)
+    
+    # Cache the results if folder_path is provided
+    if folder_path and not patterns_df.empty:
+        try:
+            cache_file = folder_path / f"departure_patterns_{selected_segment or 'all'}.parquet"
+            patterns_df.to_parquet(cache_file, index=False)
+            st.sidebar.success(f"✅ Cached departure patterns for {selected_segment or 'all'}")
+        except Exception as e:
+            st.sidebar.warning(f"⚠️ Could not cache patterns: {e}")
+    
+    return patterns_df
 
-def create_departure_forecast(purchase_forecast, departure_patterns, selected_segment=None):
+def create_departure_forecast(purchase_forecast, departure_patterns, selected_segment=None, folder_path=None):
     """
     Create departure forecast based on purchase forecast and historical patterns
     Includes trip length and per-night cost calculations
@@ -408,12 +432,24 @@ def create_departure_forecast(purchase_forecast, departure_patterns, selected_se
     - purchase_forecast: DataFrame with weekly purchase forecasts
     - departure_patterns: DataFrame with historical departure patterns
     - selected_segment: Segment being forecasted
+    - folder_path: Path to data folder for caching results
     
     Returns:
     - DataFrame with departure forecasts by week including trip metrics
     """
     if purchase_forecast.empty or departure_patterns.empty:
         return pd.DataFrame()
+    
+    # Check for cached departure forecast
+    if folder_path:
+        cache_file = folder_path / f"departure_forecast_{selected_segment or 'all'}.parquet"
+        if cache_file.exists():
+            try:
+                cached_forecast = pd.read_parquet(cache_file)
+                st.sidebar.success(f"✅ Loaded cached departure forecast for {selected_segment or 'all'}")
+                return cached_forecast
+            except Exception as e:
+                st.sidebar.warning(f"⚠️ Could not load cached forecast: {e}")
     
     departure_forecast = []
     
@@ -484,9 +520,20 @@ def create_departure_forecast(purchase_forecast, departure_patterns, selected_se
                     'forecast_type': 'departure_forecast'
                 })
     
-    return pd.DataFrame(departure_forecast)
+    forecast_df = pd.DataFrame(departure_forecast)
+    
+    # Cache the results if folder_path is provided
+    if folder_path and not forecast_df.empty:
+        try:
+            cache_file = folder_path / f"departure_forecast_{selected_segment or 'all'}.parquet"
+            forecast_df.to_parquet(cache_file, index=False)
+            st.sidebar.success(f"✅ Cached departure forecast for {selected_segment or 'all'}")
+        except Exception as e:
+            st.sidebar.warning(f"⚠️ Could not cache forecast: {e}")
+    
+    return forecast_df
 
-def calculate_traveling_policies_by_week(departure_forecast_df, start_date, end_date):
+def calculate_traveling_policies_by_week(departure_forecast_df, start_date, end_date, folder_path=None, selected_segment=None):
     """
     Calculate traveling policies for each week in the forecast period
     
@@ -494,12 +541,25 @@ def calculate_traveling_policies_by_week(departure_forecast_df, start_date, end_
     - departure_forecast_df: DataFrame with departure forecasts including return_week
     - start_date: Start date for the analysis period
     - end_date: End date for the analysis period
+    - folder_path: Path to data folder for caching results
+    - selected_segment: Segment being analyzed
     
     Returns:
     - DataFrame with weekly traveling policy counts
     """
     if departure_forecast_df.empty:
         return pd.DataFrame()
+    
+    # Check for cached traveling policies
+    if folder_path:
+        cache_file = folder_path / f"traveling_policies_{selected_segment or 'all'}.parquet"
+        if cache_file.exists():
+            try:
+                cached_traveling = pd.read_parquet(cache_file)
+                st.sidebar.success(f"✅ Loaded cached traveling policies for {selected_segment or 'all'}")
+                return cached_traveling
+            except Exception as e:
+                st.sidebar.warning(f"⚠️ Could not load cached traveling policies: {e}")
     
     # Generate all weeks in the period
     weeks = pd.date_range(start=start_date, end=end_date, freq='W-MON')
@@ -524,7 +584,18 @@ def calculate_traveling_policies_by_week(departure_forecast_df, start_date, end_
             'avg_cost_per_night': traveling_policies['avg_cost_per_night'].mean() if len(traveling_policies) > 0 else 0
         })
     
-    return pd.DataFrame(traveling_by_week)
+    traveling_df = pd.DataFrame(traveling_by_week)
+    
+    # Cache the results if folder_path is provided
+    if folder_path and not traveling_df.empty:
+        try:
+            cache_file = folder_path / f"traveling_policies_{selected_segment or 'all'}.parquet"
+            traveling_df.to_parquet(cache_file, index=False)
+            st.sidebar.success(f"✅ Cached traveling policies for {selected_segment or 'all'}")
+        except Exception as e:
+            st.sidebar.warning(f"⚠️ Could not cache traveling policies: {e}")
+    
+    return traveling_df
 
 def simple_forecast(historical_data, weeks_ahead=26, folder_path=None, selected_segment=None):
     """Main forecasting function - tries external CSV first, falls back to simple trend"""
@@ -674,12 +745,12 @@ if folder_path:
     
     # Analyze departure patterns
     with st.spinner("Analyzing departure patterns..."):
-        departure_patterns = analyze_departure_patterns(historical_df, selected_segment)
+        departure_patterns = analyze_departure_patterns(historical_df, selected_segment, folder_path=folder_path)
     
     # Create departure forecast
     departure_forecast_df = pd.DataFrame()
     if not departure_patterns.empty:
-        departure_forecast_df = create_departure_forecast(forecast_df, departure_patterns, selected_segment)
+        departure_forecast_df = create_departure_forecast(forecast_df, departure_patterns, selected_segment, folder_path)
     
     # Calculate traveling policies by week
     traveling_by_week_df = pd.DataFrame()
@@ -687,7 +758,7 @@ if folder_path:
         # Get the forecast period
         forecast_start = forecast_df['week_purchased'].min()
         forecast_end = departure_forecast_df['return_week'].max()
-        traveling_by_week_df = calculate_traveling_policies_by_week(departure_forecast_df, forecast_start, forecast_end)
+        traveling_by_week_df = calculate_traveling_policies_by_week(departure_forecast_df, forecast_start, forecast_end, folder_path, selected_segment)
     
     st.success(f"✅ Generated forecast for {len(forecast_df)} weeks")
     
