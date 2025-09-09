@@ -59,8 +59,9 @@ def aggregate_weekly_purchases(df, selected_countries, selected_regions):
     if selected_regions:
         df = df[df['region'].isin(selected_regions)]
     
-    # Group by week
-    df['week_start'] = df['dateApp'].dt.to_period('W-MON').dt.start_time
+    # Group by week (Monday start)
+    # Calculate Monday of the week for each date
+    df['week_start'] = df['dateApp'] - pd.to_timedelta(df['dateApp'].dt.weekday, unit='D')
     weekly_purchases = df.groupby('week_start').agg({
         'idpol': 'count',
         'tripCost': 'sum'
@@ -220,7 +221,7 @@ def analyze_historical_trip_costs_by_week(historical_df, selected_segment=None, 
         return pd.DataFrame()
     
     # Group by purchase week (Monday start)
-    df['purchase_week'] = df['dateApp'].dt.to_period('W-MON').dt.start_time
+    df['purchase_week'] = df['dateApp'] - pd.to_timedelta(df['dateApp'].dt.weekday, unit='D')
     
     # Aggregate by purchase week
     weekly_trip_costs = df.groupby('purchase_week').agg({
@@ -366,7 +367,7 @@ def analyze_traveling_patterns_by_cohort(historical_df, selected_segment=None, f
         return pd.DataFrame()
     
     # Group by purchase week (Monday start)
-    df['purchase_week'] = df['dateApp'].dt.to_period('W-MON').dt.start_time
+    df['purchase_week'] = df['dateApp'] - pd.to_timedelta(df['dateApp'].dt.weekday, unit='D')
     
     traveling_patterns = []
     
