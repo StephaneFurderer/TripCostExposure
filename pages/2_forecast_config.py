@@ -198,15 +198,17 @@ def convert_monthly_to_weekly_forecast(monthly_forecast, historical_data, weeks_
         else:
             next_month = month_start.replace(month=month_start.month + 1, day=1)
         
-        # Generate weeks for this month
+        # Generate ALL weeks for this month (including historical ones)
         current_week = month_start - pd.to_timedelta(month_start.weekday(), unit='D')  # Monday of first week
         month_end = next_month - pd.to_timedelta(1, unit='D')
         
-        weeks_in_month = []
+        all_weeks_in_month = []
         while current_week <= month_end:
-            if current_week >= last_week + timedelta(weeks=1):  # Only future weeks
-                weeks_in_month.append(current_week)
+            all_weeks_in_month.append(current_week)
             current_week += timedelta(weeks=1)
+        
+        # Filter to only future weeks for actual forecast
+        future_weeks_in_month = [week for week in all_weeks_in_month if week >= last_week + timedelta(weeks=1)]
         
         # Process each segment for this month
         for segment in segment_columns:
@@ -214,14 +216,16 @@ def convert_monthly_to_weekly_forecast(monthly_forecast, historical_data, weeks_
             if pd.isna(policy_count) or policy_count == 0:
                 continue
             
-            # Distribute monthly policy count across weeks for this segment
-            if weeks_in_month:
-                weekly_volume = int(policy_count / len(weeks_in_month))
-                remaining_volume = policy_count % len(weeks_in_month)
+            # Distribute monthly policy count across ALL weeks in month, but only forecast future weeks
+            if all_weeks_in_month and future_weeks_in_month:
+                weekly_volume = int(policy_count / len(all_weeks_in_month))
+                remaining_volume = policy_count % len(all_weeks_in_month)
                 
-                for i, week in enumerate(weeks_in_month):
-                    # Add remaining volume to first few weeks
-                    volume = weekly_volume + (1 if i < remaining_volume else 0)
+                for i, week in enumerate(future_weeks_in_month):
+                    # Find the position of this week in the full month
+                    week_position = all_weeks_in_month.index(week)
+                    # Add remaining volume to first few weeks of the month
+                    volume = weekly_volume + (1 if week_position < remaining_volume else 0)
                     
                     forecast_data.append({
                         'model_point_id': model_point_id,
@@ -339,13 +343,13 @@ with st.sidebar:
     )
     
     # Segment filter (will be populated after loading data)
-    st.header("Forecast Segment")
-    selected_segment = st.selectbox(
-        "Select Segment to Forecast",
-        options=[],  # Will be populated after loading historical data
-        index=0,
-        help="Select which segment to focus on for forecasting"
-    )
+    # st.header("Forecast Segment")
+    # selected_segment = st.selectbox(
+    #     "Select Segment to Forecast",
+    #     options=[],  # Will be populated after loading historical data
+    #     index=0,
+    #     help="Select which segment to focus on for forecasting"
+    # )
     
     # Forecast parameters
     st.header("Forecast Parameters")
