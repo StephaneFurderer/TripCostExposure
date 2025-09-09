@@ -71,18 +71,18 @@ def get_us_holidays(years):
         
         # Memorial Day (last Monday in May)
         may_last = pd.Timestamp(f"{year}-05-31")
-        memorial_day = may_last - pd.to_timedelta(may_last.weekday(), unit='D')
+        memorial_day = may_last - pd.Timedelta(days=may_last.weekday())
         holidays.append((memorial_day, "Memorial Day"))
         
         # Labor Day (first Monday in September)  
         sep_first = pd.Timestamp(f"{year}-09-01")
-        labor_day = sep_first + pd.to_timedelta((7 - sep_first.weekday()) % 7, unit='D')
+        labor_day = sep_first + pd.Timedelta(days=((7 - sep_first.weekday()) % 7))
         holidays.append((labor_day, "Labor Day"))
         
         # Thanksgiving (fourth Thursday in November)
         nov_first = pd.Timestamp(f"{year}-11-01")
-        first_thursday = nov_first + pd.to_timedelta((3 - nov_first.weekday()) % 7, unit='D')
-        thanksgiving = first_thursday + pd.to_timedelta(21, unit='D')  # Add 3 weeks
+        first_thursday = nov_first + pd.Timedelta(days=((3 - nov_first.weekday()) % 7))
+        thanksgiving = first_thursday + pd.Timedelta(days=21)  # Add 3 weeks
         holidays.append((thanksgiving, "Thanksgiving"))
     
     return holidays
@@ -267,7 +267,7 @@ if precomputed_data is not None:
     if extraction_date and period == "week":
         # Convert extraction date to normalized x coordinate
         extraction_week = extraction_date.isocalendar().week
-        extraction_x = pd.Timestamp(2000, 1, 3) + pd.to_timedelta((extraction_week - 1) * 7, unit="D")
+        extraction_x = pd.Timestamp(2000, 1, 3) + pd.Timedelta(days=(extraction_week - 1) * 7)
         
         fig.add_vline(
             x=extraction_x,
@@ -282,7 +282,7 @@ if precomputed_data is not None:
         holidays = get_us_holidays(years)
         for holiday_date, holiday_name in holidays:
             holiday_week = holiday_date.isocalendar().week
-            holiday_x = pd.Timestamp(2000, 1, 3) + pd.to_timedelta((holiday_week - 1) * 7, unit="D")
+            holiday_x = pd.Timestamp(2000, 1, 3) + pd.Timedelta(days=(holiday_week - 1) * 7)
             
             fig.add_vline(
                 x=holiday_x,
