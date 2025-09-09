@@ -161,6 +161,80 @@ def convert_monthly_to_weekly_forecast(monthly_forecast, historical_data, weeks_
     return pd.DataFrame(forecast_data)
 
 
+def analyze_historical_trip_costs_by_week(historical_df, selected_segment=None, folder_path=None):
+    """
+    Analyze historical trip costs by purchase week for trend and seasonality analysis
+    
+    Parameters:
+    - historical_df: DataFrame with historical purchase data
+    - selected_segment: Segment to analyze
+    - folder_path: Path for caching
+    
+    Returns:
+    - DataFrame with trip cost analysis by purchase week
+    """
+    if historical_df.empty or 'tripCost' not in historical_df.columns:
+        return pd.DataFrame()
+    
+    # Check for cached trip cost analysis
+    if folder_path:
+        cache_file = folder_path / f"trip_cost_analysis_{selected_segment or 'all'}.parquet"
+        if cache_file.exists():
+            try:
+                cached_data = pd.read_parquet(cache_file)
+                st.sidebar.success(f"✅ Loaded cached trip cost analysis for {selected_segment or 'all'}")
+                return cached_data
+            except Exception as e:
+                st.sidebar.warning(f"⚠️ Could not load cached trip cost analysis: {e}")
+    
+    # Filter by segment if specified
+    if selected_segment and 'segment' in historical_df.columns:
+        df = historical_df[historical_df['segment'] == selected_segment].copy()
+    else:
+        df = historical_df.copy()
+    
+    if df.empty:
+        return pd.DataFrame()
+    
+    # Ensure date columns are datetime
+    df['dateApp'] = pd.to_datetime(df['dateApp'], errors='coerce')
+    
+    # Filter out invalid data
+    df = df.dropna(subset=['dateApp', 'tripCost'])
+    df = df[df['tripCost'] > 0]  # Only positive trip costs
+    
+    if df.empty:
+        return pd.DataFrame()
+    
+    # Group by purchase week (Monday start)
+    df['purchase_week'] = df['dateApp'].dt.to_period('W-MON').dt.start_time
+    
+    # Aggregate by purchase week
+    weekly_trip_costs = df.groupby('purchase_week').agg({
+        'tripCost': ['mean', 'median', 'std', 'count'],
+        'dateApp': 'min'  # Keep the first date of the week for reference
+    }).reset_index()
+    
+    # Flatten column names
+    weekly_trip_costs.columns = ['purchase_week', 'avg_trip_cost', 'median_trip_cost', 'std_trip_cost', 'policy_count', 'week_start_date']
+    
+    # Add ISO week and year for seasonality analysis
+    weekly_trip_costs['iso_week'] = weekly_trip_costs['purchase_week'].dt.isocalendar().week
+    weekly_trip_costs['iso_year'] = weekly_trip_costs['purchase_week'].dt.isocalendar().year
+    
+    # Cache the results
+    if folder_path and not weekly_trip_costs.empty:
+        try:
+            cache_file = folder_path / f"trip_cost_analysis_{selected_segment or 'all'}.parquet"
+            st.sidebar.info(f"💾 Caching trip cost analysis to: {cache_file}")
+            weekly_trip_costs.to_parquet(cache_file, index=False)
+            st.sidebar.success(f"✅ Cached trip cost analysis for {selected_segment or 'all'}")
+        except Exception as e:
+            st.sidebar.warning(f"⚠️ Could not cache trip cost analysis: {e}")
+    
+    return weekly_trip_costs
+
+
 def analyze_traveling_patterns_by_cohort(historical_df, selected_segment=None, folder_path=None):
     """
     Analyze traveling patterns by purchase week cohort using historical data
