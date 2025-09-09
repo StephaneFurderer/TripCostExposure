@@ -143,8 +143,95 @@ def aggregate_weekly_purchases(df, selected_countries, selected_regions):
     
     return weekly_purchases
 
-def simple_forecast(historical_data, weeks_ahead=26):
-    """Simple forecasting using historical averages and trends"""
+def load_external_forecast(folder_path):
+    """Load external monthly policy count forecast from CSV"""
+    if not folder_path:
+        return pd.DataFrame()
+    
+    forecast_path = folder_path / "pol_count_finance.csv"
+    if not forecast_path.exists():
+        return pd.DataFrame()
+    
+    try:
+        df = pd.read_csv(forecast_path)
+        st.sidebar.success(f"✅ Loaded external forecast: {len(df)} records")
+        return df
+    except Exception as e:
+        st.sidebar.error(f"❌ Error loading forecast CSV: {e}")
+        return pd.DataFrame()
+
+def convert_monthly_to_weekly_forecast(monthly_forecast, historical_data, weeks_ahead=26):
+    """Convert monthly policy count forecast to weekly forecast"""
+    if monthly_forecast.empty:
+        return simple_forecast_fallback(historical_data, weeks_ahead)
+    
+    # Get the last week of historical data
+    last_week = historical_data['week_start'].max()
+    avg_cost = historical_data['avg_trip_cost'].mean() if not historical_data.empty else 0
+    
+    # Process monthly forecast data - convert YYYYMM to datetime
+    monthly_forecast['month'] = pd.to_datetime(monthly_forecast['month'], format='%Y%m')
+    monthly_forecast = monthly_forecast.sort_values('month')
+    
+    # Get segment columns (all columns except 'month')
+    segment_columns = [col for col in monthly_forecast.columns if col != 'month']
+    
+    # Generate weekly forecast
+    forecast_data = []
+    model_point_id = 1
+    
+    for _, row in monthly_forecast.iterrows():
+        month_start = row['month'].replace(day=1)
+        
+        # Get all weeks in this month
+        if month_start.month == 12:
+            next_month = month_start.replace(year=month_start.year + 1, month=1, day=1)
+        else:
+            next_month = month_start.replace(month=month_start.month + 1, day=1)
+        
+        # Generate weeks for this month
+        current_week = month_start - pd.to_timedelta(month_start.weekday(), unit='D')  # Monday of first week
+        month_end = next_month - pd.to_timedelta(1, unit='D')
+        
+        weeks_in_month = []
+        while current_week <= month_end:
+            if current_week >= last_week + timedelta(weeks=1):  # Only future weeks
+                weeks_in_month.append(current_week)
+            current_week += timedelta(weeks=1)
+        
+        # Process each segment for this month
+        for segment in segment_columns:
+            policy_count = row[segment]
+            if pd.isna(policy_count) or policy_count == 0:
+                continue
+            
+            # Distribute monthly policy count across weeks for this segment
+            if weeks_in_month:
+                weekly_volume = int(policy_count / len(weeks_in_month))
+                remaining_volume = policy_count % len(weeks_in_month)
+                
+                for i, week in enumerate(weeks_in_month):
+                    # Add remaining volume to first few weeks
+                    volume = weekly_volume + (1 if i < remaining_volume else 0)
+                    
+                    forecast_data.append({
+                        'model_point_id': model_point_id,
+                        'week_purchased': week,
+                        'iso_week': week.isocalendar().week,
+                        'iso_year': week.isocalendar().year,
+                        'year': week.year,
+                        'policy_volume': volume,
+                        'avg_trip_cost': avg_cost,
+                        'total_trip_cost': int(volume * avg_cost),
+                        'segment': segment,
+                        'forecast_type': 'external_csv'
+                    })
+                    model_point_id += 1
+    
+    return pd.DataFrame(forecast_data)
+
+def simple_forecast_fallback(historical_data, weeks_ahead=26):
+    """Fallback simple forecasting using historical averages and trends"""
     if historical_data.empty:
         return pd.DataFrame()
     
@@ -174,15 +261,31 @@ def simple_forecast(historical_data, weeks_ahead=26):
             'model_point_id': i,
             'week_purchased': forecast_week,
             'iso_week': forecast_week.isocalendar().week,
-            'iso_year': forecast_week.isocalendar()[0],
+            'iso_year': forecast_week.isocalendar().year,
             'year': forecast_week.year,
             'policy_volume': int(projected_volume),
             'avg_trip_cost': avg_cost,
             'total_trip_cost': int(projected_volume * avg_cost),
+            'segment': 'all',
             'forecast_type': 'simple_trend'
         })
     
     return pd.DataFrame(forecast_data)
+
+def simple_forecast(historical_data, weeks_ahead=26, folder_path=None):
+    """Main forecasting function - tries external CSV first, falls back to simple trend"""
+    if historical_data.empty:
+        return pd.DataFrame()
+    
+    # Try to load external forecast first
+    if folder_path:
+        external_forecast = load_external_forecast(folder_path)
+        if not external_forecast.empty:
+            return convert_monthly_to_weekly_forecast(external_forecast, historical_data, weeks_ahead)
+    
+    # Fallback to simple trend forecast
+    st.sidebar.info("📊 Using simple trend forecast (no external CSV found)")
+    return simple_forecast_fallback(historical_data, weeks_ahead)
 
 # Page config
 st.set_page_config(page_title="Forecast Configuration", layout="wide")
@@ -280,7 +383,7 @@ if folder_path:
     
     # Generate forecast
     with st.spinner("Generating forecast..."):
-        forecast_df = simple_forecast(weekly_purchases, weeks_ahead)
+        forecast_df = simple_forecast(weekly_purchases, weeks_ahead, folder_path)
     
     if forecast_df.empty:
         st.error("❌ Could not generate forecast")
