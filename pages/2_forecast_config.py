@@ -383,7 +383,7 @@ if folder_path and folder_path.exists():
         
         # Forecast parameters
         st.sidebar.subheader("Forecast Parameters")
-        weeks_ahead = st.sidebar.slider("Weeks to forecast", 1, 52, 26)
+        weeks_ahead = 104  # Fixed at 104 weeks (2 years)
         
         # Generate forecast
         if st.sidebar.button("Generate Forecast", type="primary"):
@@ -442,14 +442,6 @@ if folder_path and folder_path.exists():
                 # Display the traveling forecast with model point details
                 st.dataframe(traveling_forecast_df, use_container_width=True)
                 
-                # Summary by model point
-                st.subheader("📊 Summary by Model Point")
-                summary_df = traveling_forecast_df.groupby('model_point_id').agg({
-                    'traveling_policies': 'sum',
-                    'proportion': 'mean'
-                }).reset_index()
-                summary_df.columns = ['Model Point #', 'Total Traveling Policies', 'Avg Proportion']
-                st.dataframe(summary_df, use_container_width=True)
                 
             # Traveling policies analysis (cohort-based)
             if not traveling_by_week_df.empty:
