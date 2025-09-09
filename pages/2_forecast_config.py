@@ -68,6 +68,18 @@ def aggregate_weekly_purchases(df, selected_countries, selected_regions):
     if df.empty:
         return pd.DataFrame()
     
+    # Check required columns exist
+    required_cols = ['dateApp', 'country_class', 'region_class']
+    missing_cols = [col for col in required_cols if col not in df.columns]
+    if missing_cols:
+        st.error(f"❌ Missing required columns: {missing_cols}")
+        return pd.DataFrame()
+    
+    # Check for idpol or tripCost columns
+    if 'idpol' not in df.columns and 'tripCost' not in df.columns:
+        st.error("❌ No policy identifier or cost data found")
+        return pd.DataFrame()
+    
     # Apply country and region filters
     country_mask = pd.Series(False, index=df.index)
     if "US" in selected_countries:
@@ -91,18 +103,42 @@ def aggregate_weekly_purchases(df, selected_countries, selected_regions):
     filtered_df['purchase_week'] = filtered_df['dateApp'].dt.to_period('W')
     filtered_df['week_start'] = filtered_df['purchase_week'].dt.start_time
     
-    weekly_purchases = filtered_df.groupby('week_start').agg({
-        'idpol': 'count',  # Volume of policies purchased
-        'tripCost': ['sum', 'mean'],  # Total and average trip cost
-    }).round(2)
+    # Build aggregation dictionary based on available columns
+    agg_dict = {}
+    if 'idpol' in filtered_df.columns:
+        agg_dict['idpol'] = 'count'
+    else:
+        # Use index count if no idpol column
+        agg_dict['index'] = 'count'
     
-    # Flatten column names
-    weekly_purchases.columns = ['policy_volume', 'total_trip_cost', 'avg_trip_cost']
+    if 'tripCost' in filtered_df.columns:
+        agg_dict['tripCost'] = ['sum', 'mean']
+    
+    weekly_purchases = filtered_df.groupby('week_start').agg(agg_dict).round(2)
+    
+    # Flatten column names based on what we aggregated
+    if 'idpol' in agg_dict and 'tripCost' in agg_dict:
+        weekly_purchases.columns = ['policy_volume', 'total_trip_cost', 'avg_trip_cost']
+    elif 'idpol' in agg_dict:
+        weekly_purchases.columns = ['policy_volume']
+    elif 'tripCost' in agg_dict:
+        weekly_purchases.columns = ['total_trip_cost', 'avg_trip_cost']
+    else:
+        weekly_purchases.columns = ['policy_volume']
+    
     weekly_purchases = weekly_purchases.reset_index()
+    
+    # Add missing columns with defaults if needed
+    if 'policy_volume' not in weekly_purchases.columns:
+        weekly_purchases['policy_volume'] = 0
+    if 'total_trip_cost' not in weekly_purchases.columns:
+        weekly_purchases['total_trip_cost'] = 0
+    if 'avg_trip_cost' not in weekly_purchases.columns:
+        weekly_purchases['avg_trip_cost'] = 0
     
     # Add ISO week and year
     weekly_purchases['iso_week'] = weekly_purchases['week_start'].dt.isocalendar().week
-    weekly_purchases['iso_year'] = weekly_purchases['week_start'].dt.isocalendar()[0]
+    weekly_purchases['iso_year'] = weekly_purchases['week_start'].dt.isocalendar().year
     weekly_purchases['year'] = weekly_purchases['week_start'].dt.year
     
     return weekly_purchases
