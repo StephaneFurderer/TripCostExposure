@@ -854,7 +854,7 @@ if folder_path and folder_path.exists():
                         historical_precomputed = historical_precomputed.groupby(group_cols, as_index=False).agg(agg_dict)
                     
                     # Apply same filters as historical page
-                    historical_filtered = filter_aggregate_data(historical_precomputed, selected_countries, selected_regions)
+                    historical_filtered = filter_aggregate_data(historical_precomputed, ["US","ROW","null"], ["Atlantic", "Florida", "Gulf", "Pacific", "Other"])
                     
                     # Create historical plot data
                     historical_plot_data = historical_filtered.groupby(['year', 'x'], as_index=False).agg({
@@ -882,11 +882,35 @@ if folder_path and folder_path.exists():
                 forecast_plot_data['iso_year'] = forecast_plot_data['week'].dt.isocalendar().year
                 forecast_plot_data['is_forecast'] = True
                 
-                # Combine historical and forecast data
-                combined_plot_data = pd.concat([
-                    historical_plot_data[['x', 'iso_year', 'max_trip_cost_exposure', 'is_forecast']],
-                    forecast_plot_data[['x', 'iso_year', 'max_trip_cost_exposure', 'is_forecast']]
-                ], ignore_index=True)
+                # Merge historical and forecast data by ISO week and year
+                # First, prepare forecast data with proper year labeling
+                forecast_plot_data['year_label'] = forecast_plot_data['iso_year'].astype(str) + ' - forecast'
+                
+                # Merge historical and forecast data on x (ISO week) and iso_year
+                merged_data = pd.merge(
+                    historical_plot_data[['x', 'iso_year', 'max_trip_cost_exposure']], 
+                    forecast_plot_data[['x', 'iso_year', 'max_trip_cost_exposure', 'year_label']], 
+                    on=['x', 'iso_year'], 
+                    how='outer', 
+                    suffixes=('_hist', '_forecast')
+                )
+                
+                # Fill missing values with 0
+                merged_data['max_trip_cost_exposure_hist'] = merged_data['max_trip_cost_exposure_hist'].fillna(0)
+                merged_data['max_trip_cost_exposure_forecast'] = merged_data['max_trip_cost_exposure_forecast'].fillna(0)
+                
+                # Sum historical and forecast values
+                merged_data['max_trip_cost_exposure'] = merged_data['max_trip_cost_exposure_hist'] + merged_data['max_trip_cost_exposure_forecast']
+                
+                # Determine if this is forecast data (has forecast values > 0)
+                merged_data['is_forecast'] = merged_data['max_trip_cost_exposure_forecast'] > 0
+                
+                # Create year labels: use forecast label if it exists, otherwise use iso_year
+                merged_data['year_label'] = merged_data['year_label'].fillna(merged_data['iso_year'].astype(str))
+                
+                # Clean up the data for plotting
+                combined_plot_data = merged_data[['x', 'year_label', 'max_trip_cost_exposure', 'is_forecast']].copy()
+                combined_plot_data = combined_plot_data.rename(columns={'year_label': 'iso_year'})
                 
                 # Sort by ISO week for proper ordering
                 combined_plot_data = combined_plot_data.sort_values(['x', 'iso_year'])
