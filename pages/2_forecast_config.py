@@ -452,7 +452,8 @@ def create_traveling_forecast_by_cohort(purchase_forecast, trip_cost_forecast, t
     
     traveling_forecast = []
     # merge purchase_forecast and trip_cost_forecast on week_purchased
-    purchase_forecast = purchase_forecast.merge(trip_cost_forecast[['week_purchased', 'avg_trip_cost']].set_index('week_purchased'), on='week_purchased', how='left')
+    #trip_cost_forecast = trip_cost_forecast.rename(columns={'week_purchased': 'week_start'})
+    purchase_forecast = purchase_forecast.merge(trip_cost_forecast[['purchase_week','iso_week', 'avg_trip_cost']], on_right='purchase_week',on_left='week_purchased', how='left')   
     
     for _, purchase_row in purchase_forecast.iterrows():
         purchase_week = purchase_row['week_purchased']
