@@ -281,16 +281,17 @@ if precomputed_data is not None:
                     annotation_position="top"
                 )
         
-        # Add holiday lines (grouped by week to avoid duplicates)
-        holidays = get_us_holidays(years)
+        # Add holiday lines (grouped by week to avoid duplicates) - only for current year
+        current_year = pd.Timestamp.now().year
+        holidays = get_us_holidays([current_year])
         holiday_weeks = {}
         
         for holiday_date, holiday_name in holidays:
             holiday_week = holiday_date.isocalendar().week
             holiday_year = holiday_date.isocalendar()[0]
             
-            # Only consider holidays from years in our data
-            if holiday_year in years:
+            # Only consider holidays from current year
+            if holiday_year == current_year:
                 if holiday_week not in holiday_weeks:
                     holiday_weeks[holiday_week] = []
                 holiday_weeks[holiday_week].append(holiday_name)
