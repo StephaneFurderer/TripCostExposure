@@ -218,7 +218,7 @@ if precomputed_data is not None:
         
         # Convert x to ISO week number
         if 'x' in data_table.columns:
-            data_table['iso_week'] = data_table['x'].dt.isocalendar().week
+            data_table['iso_week'] = data_table['x']
             data_table['iso_year'] = data_table['year']
         
         # Group by week and year, then pivot
