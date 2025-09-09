@@ -333,9 +333,13 @@ def analyze_departure_patterns(historical_df, selected_segment=None, max_depart_
         prev_year_week = purchase_date.replace(year=purchase_date.year - 1)
         
         # Look at 3 weeks around the same time last year
+        # Convert dates to periods first, then get start_time
+        df_periods = df['dateApp'].dt.to_period('W-MON')
+        period_start_times = df_periods.dt.start_time
+        
         prev_year_data = df[
-            (df['dateApp'].dt.to_period('W-MON').start_time >= prev_year_week - pd.Timedelta(weeks=1)) &
-            (df['dateApp'].dt.to_period('W-MON').start_time <= prev_year_week + pd.Timedelta(weeks=1))
+            (period_start_times >= prev_year_week - pd.Timedelta(weeks=1)) &
+            (period_start_times <= prev_year_week + pd.Timedelta(weeks=1))
         ]
         
         if prev_year_data.empty:
