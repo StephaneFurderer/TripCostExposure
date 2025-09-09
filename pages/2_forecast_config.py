@@ -243,7 +243,7 @@ def generate_trip_cost_forecast(historical_trip_costs, start_forecast_week, week
     
     Parameters:
     - historical_trip_costs: DataFrame with historical trip cost analysis
-    - start_forecast_week: Global start date for all forecasts
+    - start_forecast_week: Global start date for all forecasts (not used for trip cost)
     - weeks_ahead: Number of weeks to forecast
     
     Returns:
@@ -260,9 +260,12 @@ def generate_trip_cost_forecast(historical_trip_costs, start_forecast_week, week
     seasonal_pattern = historical_trip_costs.groupby('iso_week')['avg_trip_cost'].mean().reset_index()
     seasonal_pattern.columns = ['iso_week', 'avg_trip_cost']
     
-    # Generate future weeks from global start date
+    # Use the last observed date from trip cost data, not the global start date
+    last_trip_cost_date = historical_trip_costs['purchase_week'].max()
+    
+    # Generate future weeks from last observed trip cost date
     future_weeks = pd.date_range(
-        start=start_forecast_week + pd.Timedelta(weeks=1), 
+        start=last_trip_cost_date + pd.Timedelta(weeks=1), 
         periods=weeks_ahead, 
         freq='W-MON'
     )
