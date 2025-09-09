@@ -327,6 +327,44 @@ fig.update_layout(legend_title_text="Departure Year", hovermode="x unified")
 
 st.plotly_chart(fig, use_container_width=True)
 
+# Add raw data table below the plot for debugging
+st.markdown("---")
+st.subheader("Raw Data Underlying the Plot")
+
+if 'data' in locals() and not data.empty:
+    st.write("This is the exact dataframe used to create the plot above:")
+    st.dataframe(data, use_container_width=True)
+    
+    # Show some basic info about the data
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Total Rows", len(data))
+    with col2:
+        st.metric("Unique Years", data['year'].nunique() if 'year' in data.columns else 0)
+    with col3:
+        st.metric("Unique Segments", data['segment'].nunique() if 'segment' in data.columns else 0)
+    with col4:
+        st.metric("Metric Column", ycol)
+    
+    # Show data types and sample values
+    st.write("**Data Types:**")
+    st.write(data.dtypes)
+    
+    # Show sample values for debugging
+    st.write("**Sample Values (first 10 rows):**")
+    st.write(data.head(10))
+    
+    # Show specific W1 2024 data if it exists
+    if 'year' in data.columns and 'x' in data.columns:
+        w1_2024_data = data[(data['year'] == 2024) & (data['x'].dt.isocalendar().week == 1)]
+        if not w1_2024_data.empty:
+            st.write("**W1 2024 Data (the problematic week):**")
+            st.write(w1_2024_data)
+        else:
+            st.write("**No W1 2024 data found in the dataset**")
+else:
+    st.info("No data available to display.")
+
 # Add data table below the plot for debugging
 st.markdown("---")
 st.subheader("Data Table: Metric by ISO Week and Year")
