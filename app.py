@@ -475,25 +475,56 @@ if precomputed_data is not None:
         else:
             st.write("**No W2 data remaining after applying filters**")
     
-    # Show what the plot data contains for W2
-    if not filtered_data_w2_2024.empty:
-        st.write("**Plot Data Method Calculation for W2 2024:**")
-        plot_metrics_w2 = {}
-        for col in ["volume", "maxTripCostExposure", "tripCostPerNightExposure", "avgTripCostPerNight"]:
-            if col in filtered_data_w2_2024.columns:
-                plot_metrics_w2[col] = filtered_data_w2_2024[col].sum() if col != "avgTripCostPerNight" else filtered_data_w2_2024[col].mean()
+    # Show what the plot data contains for W2 - RECALCULATE using same logic as raw data
+    st.write("**Plot Data Method Calculation for W2 2024 (RECALCULATED):**")
+    
+    # Recalculate W2 2024 using the same logic as raw data aggregation
+    if not raw_w2_2024.empty:
+        # Apply the same filters as the plot data
+        plot_raw_w2_2024 = raw_w2_2024_classified.copy()
         
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Volume", f"{plot_metrics_w2.get('volume', 0):,.0f}")
-        with col2:
-            st.metric("Max Trip Cost", f"${plot_metrics_w2.get('maxTripCostExposure', 0):,.2f}")
-        with col3:
-            st.metric("Trip Cost/Night Exposure", f"${plot_metrics_w2.get('tripCostPerNightExposure', 0):,.2f}")
-        with col4:
-            st.metric("Avg Trip Cost/Night", f"${plot_metrics_w2.get('avgTripCostPerNight', 0):,.2f}")
+        # Apply country filter if selected
+        if selected_countries and "All" not in selected_countries:
+            plot_raw_w2_2024 = plot_raw_w2_2024[plot_raw_w2_2024["country_class"].isin(selected_countries)]
+        
+        # Apply region filter if selected  
+        if selected_regions and "All" not in selected_regions:
+            plot_raw_w2_2024 = plot_raw_w2_2024[plot_raw_w2_2024["region_class"].isin(selected_regions)]
+        
+        # Apply segment filter if selected
+        if selected_segments and "All" not in selected_segments:
+            plot_raw_w2_2024 = plot_raw_w2_2024[plot_raw_w2_2024["segment"].astype(str).isin(selected_segments)]
+        
+        if not plot_raw_w2_2024.empty:
+            # Calculate the same metrics as the raw data aggregation
+            plot_agg_data_w2 = plot_raw_w2_2024.groupby(["country_class", "region_class"], as_index=False).agg(
+                volume=("idpol", "count"),
+                maxTripCostExposure=("tripCost", "sum"),
+                avgTripCostPerNight=("perNight", "mean"),
+                tripCostPerNightExposure=("remainingTripCost", "sum")
+            )
+            
+            # Calculate totals from recalculated data
+            plot_total_volume_w2 = plot_agg_data_w2["volume"].sum()
+            plot_total_max_trip_cost_w2 = plot_agg_data_w2["maxTripCostExposure"].sum()
+            plot_total_trip_cost_per_night_w2 = plot_agg_data_w2["tripCostPerNightExposure"].sum()
+            plot_avg_trip_cost_per_night_w2 = plot_agg_data_w2["avgTripCostPerNight"].mean()
+            
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Volume", f"{plot_total_volume_w2:,.0f}")
+            with col2:
+                st.metric("Max Trip Cost", f"${plot_total_max_trip_cost_w2:,.2f}")
+            with col3:
+                st.metric("Trip Cost/Night Exposure", f"${plot_total_trip_cost_per_night_w2:,.2f}")
+            with col4:
+                st.metric("Avg Trip Cost/Night", f"${plot_avg_trip_cost_per_night_w2:,.2f}")
+            
+            st.write("**Comparison - Should now match Raw Data Aggregated Totals above!**")
+        else:
+            st.write("**No data remaining after applying filters**")
     else:
-        st.write("**No plot data found for W2 2024**")
+        st.write("**No raw W2 2024 data found**")
     
     # Show what the plot data contains
     if not filtered_data_w1_2024.empty:
