@@ -69,6 +69,7 @@ def aggregate_weekly_purchases(df, selected_countries, selected_regions):
     weekly_purchases.columns = ['week_start', 'policy_volume', 'total_trip_cost']
     weekly_purchases['avg_trip_cost'] = weekly_purchases['total_trip_cost'] / weekly_purchases['policy_volume']
     weekly_purchases['iso_week'] = weekly_purchases['week_start'].dt.isocalendar().week
+    weekly_purchases['iso_year'] = weekly_purchases['week_start'].dt.isocalendar().year
     weekly_purchases['year'] = weekly_purchases['week_start'].dt.year
     
     return weekly_purchases
@@ -151,6 +152,7 @@ def convert_monthly_to_weekly_forecast(monthly_forecast, historical_data, start_
                         'week_purchased': week,
                         'policy_volume': volume,
                         'iso_week': week.isocalendar().week,
+                        'iso_year': week.isocalendar().year,
                         'year': week.year,
                         'avg_trip_cost': 0,  # Placeholder
                         'total_trip_cost': 0  # Placeholder
