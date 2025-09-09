@@ -410,6 +410,10 @@ if folder_path and folder_path.exists():
                 st.error("❌ Could not generate forecast")
                 st.stop()
             
+            # Analyze historical trip costs by week
+            with st.spinner("Analyzing historical trip costs by week..."):
+                trip_cost_analysis = analyze_historical_trip_costs_by_week(historical_df, selected_segment, folder_path)
+            
             # Analyze traveling patterns by cohort (new approach)
             with st.spinner("Analyzing traveling patterns by cohort..."):
                 traveling_patterns = analyze_traveling_patterns_by_cohort(historical_df, selected_segment, folder_path)
@@ -437,6 +441,38 @@ if folder_path and folder_path.exists():
             
             # Display forecast results
             st.markdown("---")
+            
+            # Historical Trip Cost Analysis - First Plot
+            if not trip_cost_analysis.empty:
+                st.subheader("💰 Historical Trip Cost Analysis")
+                
+                # Create the plot
+                fig = px.line(
+                    trip_cost_analysis,
+                    x='iso_week',
+                    y='avg_trip_cost',
+                    color='iso_year',
+                    color_discrete_sequence=px.colors.qualitative.Safe,
+                    labels={'iso_week': 'ISO Week', 'avg_trip_cost': 'Average Trip Cost', 'iso_year': 'ISO Year'},
+                )
+                
+                # Configure x-axis ticks for ISO weeks
+                tickvals = list(range(1, 53, 4))  # W1, W5, W9, W13, etc.
+                ticktext = [f"W{w}" for w in tickvals]
+                fig.update_xaxes(tickmode="array", tickvals=tickvals, ticktext=ticktext)
+                
+                fig.update_layout(
+                    title="Historical Average Trip Cost by Purchase Week",
+                    legend_title_text="ISO Year",
+                    hovermode="x unified"
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Data table
+                st.dataframe(trip_cost_analysis, use_container_width=True)
+            else:
+                st.warning("No trip cost data available for analysis")
             
             # Purchase forecast section
             st.subheader("📈 Purchase Forecast")
