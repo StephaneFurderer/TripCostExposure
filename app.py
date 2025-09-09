@@ -766,9 +766,9 @@ else:
 
 # Create the plot
 ycol = selected_metric
-if group_by_segment and "segment" in data.columns:
+if group_by_segment and "segment" in filtered_data.columns:
     fig = px.line(
-        data,
+        filtered_data,
         x="x",
         y=ycol,
         color="year",
@@ -779,7 +779,7 @@ if group_by_segment and "segment" in data.columns:
     )
 else:
     fig = px.line(
-        data,
+        filtered_data,
         x="x",
         y=ycol,
         color="year",
