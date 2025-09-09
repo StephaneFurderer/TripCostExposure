@@ -435,7 +435,7 @@ def analyze_traveling_patterns_by_cohort(historical_df, selected_segment=None, f
     
     return patterns_df
 
-def create_traveling_forecast_by_cohort(purchase_forecast, traveling_patterns, selected_segment=None):
+def create_traveling_forecast_by_cohort(purchase_forecast, trip_cost_forecast, traveling_patterns, selected_segment=None):
     """
     Create traveling forecast using cohort-based patterns
     
@@ -451,10 +451,13 @@ def create_traveling_forecast_by_cohort(purchase_forecast, traveling_patterns, s
         return pd.DataFrame()
     
     traveling_forecast = []
+    # merge purchase_forecast and trip_cost_forecast on week_purchased
+    purchase_forecast = purchase_forecast.merge(trip_cost_forecast[['week_purchased', 'avg_trip_cost']], on='week_purchased', how='left')
     
     for _, purchase_row in purchase_forecast.iterrows():
         purchase_week = purchase_row['week_purchased']
         policy_volume = purchase_row['policy_volume']
+        avg_trip_cost = purchase_row['avg_trip_cost']
         
         # Find matching historical pattern (same week from previous year)
         forecast_week = purchase_week.isocalendar().week
@@ -468,23 +471,24 @@ def create_traveling_forecast_by_cohort(purchase_forecast, traveling_patterns, s
         if matching_patterns.empty:
             # Use average pattern if no exact match
             avg_patterns = traveling_patterns.groupby('weeks_after_purchase').agg({
-                'proportion': 'mean'
+                'proportion': 'mean','trip_cost_proportion':'mean'
             }).reset_index()
         else:
             # Average across all years for the same week of year
             avg_patterns = matching_patterns.groupby('weeks_after_purchase').agg({
-                'proportion': 'mean'
+                'proportion': 'mean','trip_cost_proportion':'mean'
             }).reset_index()
         
         # Apply pattern to forecasted policy volume
         for _, pattern in avg_patterns.iterrows():
             weeks_after = pattern['weeks_after_purchase']
             proportion = pattern['proportion']
-            
+            trip_cost_proportion = pattern['trip_cost_proportion']
             if proportion > 0.001:  # Only include meaningful proportions
                 target_week = purchase_week + pd.Timedelta(weeks=weeks_after)
                 traveling_volume = int(policy_volume * proportion)
-                
+                avg_max_trip_cost_exposure = (trip_cost_proportion * avg_trip_cost)
+                max_trip_cost_exposure = (traveling_volume * avg_max_trip_cost_exposure)
                 if traveling_volume > 0:
                     traveling_forecast.append({
                         'model_point_id': purchase_row['model_point_id'],
@@ -492,6 +496,8 @@ def create_traveling_forecast_by_cohort(purchase_forecast, traveling_patterns, s
                         'target_week': target_week,
                         'weeks_after_purchase': weeks_after,
                         'traveling_policies': traveling_volume,
+                        'max_trip_cost_exposure': max_trip_cost_exposure,
+                        'avg_max_trip_cost_exposure': avg_max_trip_cost_exposure,
                         'proportion': proportion,
                         'segment': selected_segment or 'all',
                         'forecast_type': 'traveling_cohort_forecast'
@@ -577,6 +583,13 @@ if folder_path and folder_path.exists():
             with st.spinner("Analyzing historical trip costs by week..."):
                 trip_cost_analysis = analyze_historical_trip_costs_by_week(historical_df, selected_segment, folder_path)
             
+            if not trip_cost_analysis.empty:
+                # Generate trip cost forecast
+                trip_cost_forecast = generate_trip_cost_forecast(trip_cost_analysis, start_forecast_week, weeks_ahead=104)
+            else:
+                st.error("❌ Could not generate trip cost forecast")
+                st.stop()
+
             # Analyze traveling patterns by cohort (new approach)
             with st.spinner("Analyzing traveling patterns by cohort..."):
                 traveling_patterns = analyze_traveling_patterns_by_cohort(historical_df, selected_segment, folder_path)
@@ -584,14 +597,15 @@ if folder_path and folder_path.exists():
             # Create traveling forecast using cohort patterns
             traveling_forecast_df = pd.DataFrame()
             if not traveling_patterns.empty:
-                traveling_forecast_df = create_traveling_forecast_by_cohort(forecast_df, traveling_patterns, selected_segment)
+                traveling_forecast_df = create_traveling_forecast_by_cohort(forecast_df, trip_cost_forecast,traveling_patterns, selected_segment)
             
             # Aggregate traveling policies by week
             traveling_by_week_df = pd.DataFrame()
             if not traveling_forecast_df.empty:
                 # Group by target_week to get weekly traveling totals
                 traveling_by_week_df = traveling_forecast_df.groupby('target_week').agg({
-                    'traveling_policies': 'sum'
+                    'traveling_policies': 'sum',
+                    'max_trip_cost_exposure': 'sum'
                 }).reset_index()
                 traveling_by_week_df = traveling_by_week_df.rename(columns={'target_week': 'week'})
                 
@@ -608,9 +622,6 @@ if folder_path and folder_path.exists():
             # Historical Trip Cost Analysis - First Plot
             if not trip_cost_analysis.empty:
                 st.subheader("💰 Historical Trip Cost Analysis + Forecast")
-                
-                # Generate trip cost forecast
-                trip_cost_forecast = generate_trip_cost_forecast(trip_cost_analysis, start_forecast_week, weeks_ahead=104)
                 
                 # Combine historical and forecast data
                 if not trip_cost_forecast.empty:
@@ -762,6 +773,8 @@ if folder_path and folder_path.exists():
             if not traveling_by_week_df.empty:
                 st.subheader("✈️ Traveling Policies by Week")
                 
+
+                # policy volume per week
                 # Create normalized week visualization similar to historical page
                 plot_data = traveling_by_week_df.copy()
                 
@@ -797,10 +810,37 @@ if folder_path and folder_path.exists():
                 
                 st.plotly_chart(fig, use_container_width=True)
                 
+
+
+                # Create the plot
+                fig = px.line(
+                    plot_data,
+                    x="x",
+                    y="max_trip_cost_exposure",
+                    color="iso_year",
+                    color_discrete_sequence=px.colors.qualitative.Safe,
+                    labels={"x": "ISO Week", "max_trip_cost_exposure": "Max Trip Cost Exposure", "iso_year": "ISO Year"},
+                )
+                
+                # Configure x-axis ticks for ISO weeks
+                tickvals = list(range(1, 53, 4))  # W1, W5, W9, W13, etc.
+                ticktext = [f"W{w}" for w in tickvals]
+                fig.update_xaxes(tickmode="array", tickvals=tickvals, ticktext=ticktext)
+                
+                fig.update_layout(
+                    title="Max Trip Cost Exposure by Week (Normalized)",
+                    legend_title_text="ISO Year",
+                    hovermode="x unified"
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+
+
+
                 # Data table
                 st.dataframe(traveling_by_week_df, use_container_width=True)
             
-            
+                #max trip cost exposure per week
             
             # Download forecast data
             st.markdown("---")
