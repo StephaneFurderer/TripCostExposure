@@ -285,6 +285,144 @@ def simple_forecast_fallback(historical_data, weeks_ahead=26, selected_segment=N
     
     return pd.DataFrame(forecast_data)
 
+def analyze_departure_patterns(historical_df, selected_segment=None, max_depart_weeks=52):
+    """
+    Analyze historical departure patterns by looking at same week ±1 week from previous year
+    
+    Parameters:
+    - historical_df: DataFrame with historical purchase and departure data
+    - selected_segment: Segment to analyze (None for all segments)
+    - max_depart_weeks: Maximum weeks ahead to analyze departure patterns
+    
+    Returns:
+    - DataFrame with departure distribution patterns
+    """
+    if historical_df.empty or 'dateDepart' not in historical_df.columns:
+        return pd.DataFrame()
+    
+    # Filter by segment if specified
+    if selected_segment and 'segment' in historical_df.columns:
+        df = historical_df[historical_df['segment'] == selected_segment].copy()
+    else:
+        df = historical_df.copy()
+    
+    if df.empty:
+        return pd.DataFrame()
+    
+    # Ensure date columns are datetime
+    df['dateApp'] = pd.to_datetime(df['dateApp'], errors='coerce')
+    df['dateDepart'] = pd.to_datetime(df['dateDepart'], errors='coerce')
+    
+    # Calculate weeks between purchase and departure
+    df['weeks_to_depart'] = ((df['dateDepart'] - df['dateApp']).dt.days / 7).round().astype(int)
+    
+    # Filter out invalid data
+    df = df[(df['weeks_to_depart'] >= 0) & (df['weeks_to_depart'] <= max_depart_weeks)]
+    
+    if df.empty:
+        return pd.DataFrame()
+    
+    # Group by purchase week and analyze departure patterns
+    departure_patterns = []
+    
+    for purchase_week in df['dateApp'].dt.to_period('W-MON').unique():
+        week_data = df[df['dateApp'].dt.to_period('W-MON') == purchase_week]
+        
+        # Get the same week from previous year ±1 week
+        purchase_date = purchase_week.start_time
+        prev_year_week = purchase_date.replace(year=purchase_date.year - 1)
+        
+        # Look at 3 weeks around the same time last year
+        prev_year_data = df[
+            (df['dateApp'].dt.to_period('W-MON').start_time >= prev_year_week - pd.Timedelta(weeks=1)) &
+            (df['dateApp'].dt.to_period('W-MON').start_time <= prev_year_week + pd.Timedelta(weeks=1))
+        ]
+        
+        if prev_year_data.empty:
+            continue
+        
+        # Calculate departure distribution for this purchase week
+        total_policies = len(week_data)
+        if total_policies == 0:
+            continue
+        
+        # Get departure distribution from previous year's similar period
+        prev_departure_dist = prev_year_data['weeks_to_depart'].value_counts().sort_index()
+        
+        # Normalize to get proportions
+        departure_proportions = {}
+        for weeks_ahead, count in prev_departure_dist.items():
+            proportion = count / len(prev_year_data)
+            departure_proportions[weeks_ahead] = proportion
+        
+        departure_patterns.append({
+            'purchase_week': purchase_week.start_time,
+            'total_policies': total_policies,
+            'departure_distribution': departure_proportions
+        })
+    
+    return pd.DataFrame(departure_patterns)
+
+def create_departure_forecast(purchase_forecast, departure_patterns, selected_segment=None):
+    """
+    Create departure forecast based on purchase forecast and historical patterns
+    
+    Parameters:
+    - purchase_forecast: DataFrame with weekly purchase forecasts
+    - departure_patterns: DataFrame with historical departure patterns
+    - selected_segment: Segment being forecasted
+    
+    Returns:
+    - DataFrame with departure forecasts by week
+    """
+    if purchase_forecast.empty or departure_patterns.empty:
+        return pd.DataFrame()
+    
+    departure_forecast = []
+    
+    for _, purchase_row in purchase_forecast.iterrows():
+        purchase_week = purchase_row['week_purchased']
+        policy_volume = purchase_row['policy_volume']
+        
+        # Find matching historical pattern (same week of year)
+        purchase_period = purchase_week.to_period('W-MON')
+        matching_patterns = departure_patterns[
+            departure_patterns['purchase_week'].dt.to_period('W-MON') == purchase_period
+        ]
+        
+        if matching_patterns.empty:
+            # Use average pattern if no exact match
+            avg_distribution = {}
+            for _, pattern in departure_patterns.iterrows():
+                for weeks_ahead, proportion in pattern['departure_distribution'].items():
+                    if weeks_ahead not in avg_distribution:
+                        avg_distribution[weeks_ahead] = []
+                    avg_distribution[weeks_ahead].append(proportion)
+            
+            # Calculate average proportions
+            for weeks_ahead in avg_distribution:
+                avg_distribution[weeks_ahead] = sum(avg_distribution[weeks_ahead]) / len(avg_distribution[weeks_ahead])
+        else:
+            # Use the first matching pattern
+            avg_distribution = matching_patterns.iloc[0]['departure_distribution']
+        
+        # Apply distribution to forecasted policy volume
+        for weeks_ahead, proportion in avg_distribution.items():
+            depart_week = purchase_week + pd.Timedelta(weeks=weeks_ahead)
+            depart_volume = int(policy_volume * proportion)
+            
+            if depart_volume > 0:
+                departure_forecast.append({
+                    'purchase_week': purchase_week,
+                    'depart_week': depart_week,
+                    'weeks_to_depart': weeks_ahead,
+                    'policy_volume': depart_volume,
+                    'segment': selected_segment or 'all',
+                    'forecast_type': 'departure_forecast'
+                })
+    
+    return pd.DataFrame(departure_forecast)
+
 def simple_forecast(historical_data, weeks_ahead=26, folder_path=None, selected_segment=None):
     """Main forecasting function - tries external CSV first, falls back to simple trend"""
     if historical_data.empty:
@@ -431,6 +569,15 @@ if folder_path:
         st.error("❌ Could not generate forecast")
         st.stop()
     
+    # Analyze departure patterns
+    with st.spinner("Analyzing departure patterns..."):
+        departure_patterns = analyze_departure_patterns(historical_df, selected_segment)
+    
+    # Create departure forecast
+    departure_forecast_df = pd.DataFrame()
+    if not departure_patterns.empty:
+        departure_forecast_df = create_departure_forecast(forecast_df, departure_patterns, selected_segment)
+    
     st.success(f"✅ Generated forecast for {len(forecast_df)} weeks")
     
     # Display forecast results
@@ -493,11 +640,98 @@ if folder_path:
     # Download forecast data
     csv = forecast_df.to_csv(index=False)
     st.download_button(
-        label="📥 Download Forecast Data",
+        label="📥 Download Purchase Forecast Data",
         data=csv,
         file_name=f"policy_purchase_forecast_{datetime.now().strftime('%Y%m%d')}.csv",
         mime="text/csv"
     )
+    
+    # Departure forecast section
+    if not departure_forecast_df.empty:
+        st.markdown("---")
+        st.subheader("🚀 Departure Forecast")
+        
+        # Aggregate departure forecast by depart week
+        departure_weekly = departure_forecast_df.groupby('depart_week').agg({
+            'policy_volume': 'sum'
+        }).reset_index()
+        departure_weekly = departure_weekly.sort_values('depart_week')
+        
+        # Departure forecast summary
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total Departure Volume", f"{departure_forecast_df['policy_volume'].sum():,}")
+        with col2:
+            st.metric("Avg Weekly Departures", f"{departure_weekly['policy_volume'].mean():.0f}")
+        with col3:
+            st.metric("Peak Departure Week", f"{departure_weekly['policy_volume'].max():,}")
+        with col4:
+            st.metric("Forecast Period", f"{departure_weekly['depart_week'].min().strftime('%Y-%m-%d')} to {departure_weekly['depart_week'].max().strftime('%Y-%m-%d')}")
+        
+        # Departure forecast chart
+        fig_departure = go.Figure()
+        fig_departure.add_trace(go.Scatter(
+            x=departure_weekly['depart_week'],
+            y=departure_weekly['policy_volume'],
+            mode='lines+markers',
+            name='Departure Forecast',
+            line=dict(color='green', width=2)
+        ))
+        
+        fig_departure.update_layout(
+            title=f"Policy Departure Forecast - {selected_segment or 'All Segments'}",
+            xaxis_title="Departure Week",
+            yaxis_title="Departure Volume",
+            hovermode='x unified',
+            legend=dict(x=0.02, y=0.98)
+        )
+        
+        st.plotly_chart(fig_departure, use_container_width=True)
+        
+        # Departure distribution analysis
+        st.subheader("📊 Departure Distribution Analysis")
+        
+        # Show distribution by weeks to depart
+        depart_dist = departure_forecast_df.groupby('weeks_to_depart').agg({
+            'policy_volume': 'sum'
+        }).reset_index()
+        depart_dist['proportion'] = depart_dist['policy_volume'] / depart_dist['policy_volume'].sum()
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Distribution chart
+            fig_dist = px.bar(
+                depart_dist, 
+                x='weeks_to_depart', 
+                y='policy_volume',
+                title="Departure Distribution by Weeks Ahead",
+                labels={'policy_volume': 'Policy Volume', 'weeks_to_depart': 'Weeks to Depart'}
+            )
+            st.plotly_chart(fig_dist, use_container_width=True)
+        
+        with col2:
+            # Distribution table
+            st.subheader("Distribution Summary")
+            st.dataframe(
+                depart_dist[['weeks_to_depart', 'policy_volume', 'proportion']].round(3),
+                use_container_width=True
+            )
+        
+        # Detailed departure forecast table
+        st.subheader("📋 Detailed Departure Forecast")
+        st.dataframe(departure_forecast_df, use_container_width=True)
+        
+        # Download departure forecast
+        departure_csv = departure_forecast_df.to_csv(index=False)
+        st.download_button(
+            label="📥 Download Departure Forecast CSV",
+            data=departure_csv,
+            file_name=f"departure_forecast_{selected_segment or 'all'}_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv"
+        )
+    else:
+        st.warning("⚠️ No departure patterns found in historical data. Cannot generate departure forecast.")
 
 else:
     st.info("Please select a data folder in the sidebar to begin forecasting.")
