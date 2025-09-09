@@ -430,6 +430,55 @@ else:
     st.write("**Plot Data (Aggregated) for W1 2024:**")
     st.dataframe(filtered_data_w1_2024)
     
+    # Get W1 2024 from precomputed data (direct from parquet)
+    if precomputed_data is not None:
+        st.write("**Precomputed Data (Direct from Parquet) for W1 2024:**")
+        precomputed_w1_2024 = precomputed_data[(precomputed_data["year"] == 2024) & (precomputed_data["x"].dt.isocalendar().week == 1)]
+        st.dataframe(precomputed_w1_2024)
+        
+        # Apply same filters as plot data to precomputed data
+        precomputed_filtered_w1_2024 = filter_aggregate_data(precomputed_w1_2024, selected_countries, selected_regions)
+        st.write("**Precomputed Data (After Filtering) for W1 2024:**")
+        st.dataframe(precomputed_filtered_w1_2024)
+        
+        # Aggregate precomputed data by plotting dimensions (same as plot data)
+        if not precomputed_filtered_w1_2024.empty:
+            plot_group_cols = ["year", "x"]
+            if group_by_segment and "segment" in precomputed_filtered_w1_2024.columns:
+                plot_group_cols.append("segment")
+            
+            plot_agg_dict = {}
+            for col in ["volume", "maxTripCostExposure", "tripCostPerNightExposure", "avgTripCostPerNight"]:
+                if col in precomputed_filtered_w1_2024.columns:
+                    if col == "avgTripCostPerNight":
+                        plot_agg_dict[col] = "mean"
+                    else:
+                        plot_agg_dict[col] = "sum"
+            
+            precomputed_plot_w1_2024 = precomputed_filtered_w1_2024.groupby(plot_group_cols, as_index=False).agg(plot_agg_dict)
+            st.write("**Precomputed Data (Aggregated for Plotting) for W1 2024:**")
+            st.dataframe(precomputed_plot_w1_2024)
+            
+            # Compare totals
+            st.write("**Comparison of W1 2024 Totals:**")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Plot Data Volume", filtered_data_w1_2024["volume"].sum() if not filtered_data_w1_2024.empty else 0)
+                st.metric("Plot Data Max Trip Cost", f"${filtered_data_w1_2024['maxTripCostExposure'].sum():,.2f}" if not filtered_data_w1_2024.empty else "$0.00")
+            with col2:
+                st.metric("Precomputed Volume", precomputed_plot_w1_2024["volume"].sum() if not precomputed_plot_w1_2024.empty else 0)
+                st.metric("Precomputed Max Trip Cost", f"${precomputed_plot_w1_2024['maxTripCostExposure'].sum():,.2f}" if not precomputed_plot_w1_2024.empty else "$0.00")
+            with col3:
+                plot_vol = filtered_data_w1_2024["volume"].sum() if not filtered_data_w1_2024.empty else 0
+                precomp_vol = precomputed_plot_w1_2024["volume"].sum() if not precomputed_plot_w1_2024.empty else 0
+                diff_vol = plot_vol - precomp_vol
+                st.metric("Difference (Plot - Precomp)", diff_vol)
+                
+                plot_cost = filtered_data_w1_2024["maxTripCostExposure"].sum() if not filtered_data_w1_2024.empty else 0
+                precomp_cost = precomputed_plot_w1_2024["maxTripCostExposure"].sum() if not precomputed_plot_w1_2024.empty else 0
+                diff_cost = plot_cost - precomp_cost
+                st.metric("Cost Difference", f"${diff_cost:,.2f}")
+    
     # Get raw policies for W1 2024 from combined data
     combined_data = pd.read_parquet(os.path.join(selected_folder, "combined.parquet"))
     wk_start = pd.Timestamp("2024-01-01")  # W1 2024 starts Jan 1
