@@ -269,10 +269,15 @@ def generate_trip_cost_forecast(historical_trip_costs, start_forecast_week, week
     
     # Use the last observed date from trip cost data, not the global start date
     last_trip_cost_date = historical_trip_costs['purchase_week'].max()
+    last_iso_week = last_trip_cost_date.isocalendar().week
+    last_iso_year = last_trip_cost_date.isocalendar().year
     
-    # Generate future weeks from last observed trip cost date
+    # Find the next Monday after the last observed date
+    next_monday = last_trip_cost_date + pd.Timedelta(days=(7 - last_trip_cost_date.weekday()))
+    
+    # Generate future weeks from the next Monday
     future_weeks = pd.date_range(
-        start=last_trip_cost_date + pd.Timedelta(weeks=1), 
+        start=next_monday, 
         periods=weeks_ahead, 
         freq='W-MON'
     )
