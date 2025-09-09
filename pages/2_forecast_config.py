@@ -222,6 +222,9 @@ def analyze_traveling_patterns_by_cohort(historical_df, selected_segment=None, f
         if total_purchased == 0:
             continue
         
+        # Calculate average trip cost for the entire cohort
+        cohort_avg_trip_cost = cohort_policies['tripCost'].mean() if 'tripCost' in cohort_policies.columns else 0
+        
         # For each week from 0 to 104 (2 years max)
         for weeks_after in range(0, 105):  # 0 to 104 weeks (2 years)
             target_week_start = purchase_week + pd.Timedelta(weeks=weeks_after)
@@ -236,12 +239,21 @@ def analyze_traveling_patterns_by_cohort(historical_df, selected_segment=None, f
             traveling_count = len(traveling_policies)
             proportion = traveling_count / total_purchased if total_purchased > 0 else 0
             
+            # Calculate average trip cost for traveling policies this week
+            traveling_avg_trip_cost = traveling_policies['tripCost'].mean() if 'tripCost' in traveling_policies.columns and len(traveling_policies) > 0 else 0
+            
+            # Calculate trip cost proportion
+            trip_cost_proportion = traveling_avg_trip_cost / cohort_avg_trip_cost if cohort_avg_trip_cost > 0 else 0
+            
             traveling_patterns.append({
                 'purchase_week': purchase_week,
                 'weeks_after_purchase': weeks_after,
                 'total_purchased': total_purchased,
                 'traveling_policies': traveling_count,
-                'proportion': proportion
+                'proportion': proportion,
+                'cohort_avg_trip_cost': cohort_avg_trip_cost,
+                'traveling_avg_trip_cost': traveling_avg_trip_cost,
+                'trip_cost_proportion': trip_cost_proportion
             })
             
             # Stop if proportion is small (5%) or after 2 years
