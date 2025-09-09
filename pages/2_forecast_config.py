@@ -446,6 +446,42 @@ if folder_path and folder_path.exists():
             # Traveling policies analysis (cohort-based)
             if not traveling_by_week_df.empty:
                 st.subheader("✈️ Traveling Policies by Week")
+                
+                # Create normalized week visualization similar to historical page
+                plot_data = traveling_by_week_df.copy()
+                
+                # Normalize weeks to year 2000 (same as historical page)
+                plot_data['x'] = plot_data['week'].dt.to_period('W-MON').dt.start_time
+                plot_data['x'] = plot_data['x'].apply(lambda x: x.replace(year=2000))
+                
+                # Add ISO year for coloring
+                plot_data['iso_year'] = plot_data['week'].dt.isocalendar().year
+                
+                # Create the plot
+                fig = px.line(
+                    plot_data,
+                    x="x",
+                    y="traveling_policies",
+                    color="iso_year",
+                    color_discrete_sequence=px.colors.qualitative.Safe,
+                    labels={"x": "Week (normalized)", "traveling_policies": "Traveling Policies", "iso_year": "ISO Year"},
+                )
+                
+                # Configure x-axis ticks for weeks (same as historical page)
+                week_starts = pd.to_datetime("2000-01-03") + pd.to_timedelta(range(0, 52, 4), unit="W")
+                tickvals = week_starts
+                ticktext = [f"W{int(((d - pd.Timestamp('2000-01-03')).days)/7)+1}" for d in tickvals]
+                fig.update_xaxes(tickmode="array", tickvals=tickvals, ticktext=ticktext)
+                
+                fig.update_layout(
+                    title="Traveling Policies by Week (Normalized)",
+                    legend_title_text="ISO Year",
+                    hovermode="x unified"
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Data table
                 st.dataframe(traveling_by_week_df, use_container_width=True)
             
             
