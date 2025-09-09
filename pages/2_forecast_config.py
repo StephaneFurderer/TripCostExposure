@@ -453,9 +453,8 @@ if folder_path and folder_path.exists():
                 # Sort by week to ensure proper ordering
                 plot_data = plot_data.sort_values('week')
                 
-                # Normalize weeks to year 2000 (same as historical page)
-                plot_data['x'] = plot_data['week'].dt.to_period('W-MON').dt.start_time
-                plot_data['x'] = plot_data['x'].apply(lambda x: x.replace(year=2000))
+                # Use ISO week numbers for x-axis
+                plot_data['x'] = plot_data['week'].dt.isocalendar().week
                 
                 # Add ISO year for coloring
                 plot_data['iso_year'] = plot_data['week'].dt.isocalendar().year
@@ -467,13 +466,12 @@ if folder_path and folder_path.exists():
                     y="traveling_policies",
                     color="iso_year",
                     color_discrete_sequence=px.colors.qualitative.Safe,
-                    labels={"x": "Week (normalized)", "traveling_policies": "Traveling Policies", "iso_year": "ISO Year"},
+                    labels={"x": "ISO Week", "traveling_policies": "Traveling Policies", "iso_year": "ISO Year"},
                 )
                 
-                # Configure x-axis ticks for weeks (same as historical page)
-                week_starts = pd.to_datetime("2000-01-03") + pd.to_timedelta(range(0, 52, 4), unit="W")
-                tickvals = week_starts
-                ticktext = [f"W{int(((d - pd.Timestamp('2000-01-03')).days)/7)+1}" for d in tickvals]
+                # Configure x-axis ticks for ISO weeks
+                tickvals = list(range(1, 53, 4))  # W1, W5, W9, W13, etc.
+                ticktext = [f"W{w}" for w in tickvals]
                 fig.update_xaxes(tickmode="array", tickvals=tickvals, ticktext=ticktext)
                 
                 fig.update_layout(
