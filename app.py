@@ -414,11 +414,30 @@ if not plot_data.empty:
     
     # For traveling data, we need to convert back to actual dates
     if metric_mode == "Traveling":
-        # Convert normalized x back to actual dates
+        # Convert normalized x back to actual dates using proper ISO week calculation
         # The normalized x is set to 2000, so we need to extract the week and apply to actual year
-        chrono_data["actual_date"] = chrono_data.apply(lambda row: 
-            pd.Timestamp(f"{row['year']}-01-01") + 
-            pd.to_timedelta((row['x'].isocalendar().week - 1) * 7, unit="D"), axis=1)
+        def convert_to_actual_date(row):
+            year = row['year']
+            week_num = row['x'].isocalendar().week
+            
+            # Use pandas to find the actual date for this ISO week
+            # Start with January 1st of the year
+            jan_1 = pd.Timestamp(f"{year}-01-01")
+            
+            # Find the first Monday of the ISO year
+            # ISO week 1 is the first week with at least 4 days in the new year
+            first_monday = jan_1 + pd.to_timedelta((7 - jan_1.weekday()) % 7, unit="D")
+            
+            # If the first Monday is in the previous year, it means week 1 starts later
+            if first_monday.year < year:
+                # Week 1 starts on the first Monday of the new year
+                first_monday = first_monday + pd.to_timedelta(7, unit="D")
+            
+            # Calculate the actual date for this week
+            actual_date = first_monday + pd.to_timedelta((week_num - 1) * 7, unit="D")
+            return actual_date
+        
+        chrono_data["actual_date"] = chrono_data.apply(convert_to_actual_date, axis=1)
     else:
         # For departures, x is already the departure date
         chrono_data["actual_date"] = chrono_data["x"]
@@ -445,7 +464,7 @@ if not plot_data.empty:
             category_orders={"year": years},
             labels={"actual_date": "Date", ycol: ycol, "year": "Year"},
         )
-    
+    a
     # Configure x-axis for chronological display
     fig_chrono.update_xaxes(
         tickformat="%Y-%m-%d",
