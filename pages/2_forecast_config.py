@@ -235,6 +235,57 @@ def analyze_historical_trip_costs_by_week(historical_df, selected_segment=None, 
     return weekly_trip_costs
 
 
+def generate_trip_cost_forecast(historical_trip_costs, weeks_ahead=104):
+    """
+    Generate trip cost forecast using average of available years (2023, 2024, 2025)
+    
+    Parameters:
+    - historical_trip_costs: DataFrame with historical trip cost analysis
+    - weeks_ahead: Number of weeks to forecast
+    
+    Returns:
+    - DataFrame with forecast data
+    """
+    if historical_trip_costs.empty:
+        return pd.DataFrame()
+    
+    # Get available years from historical data
+    available_years = sorted(historical_trip_costs['iso_year'].unique())
+    st.sidebar.info(f"Available years for trip cost forecast: {available_years}")
+    
+    # Calculate average trip cost for each ISO week across available years
+    seasonal_pattern = historical_trip_costs.groupby('iso_week')['avg_trip_cost'].mean().reset_index()
+    seasonal_pattern.columns = ['iso_week', 'avg_trip_cost']
+    
+    # Get the last date from historical data
+    last_date = historical_trip_costs['purchase_week'].max()
+    
+    # Generate future weeks
+    future_weeks = pd.date_range(
+        start=last_date + pd.Timedelta(weeks=1), 
+        periods=weeks_ahead, 
+        freq='W-MON'
+    )
+    
+    forecast_data = []
+    for week in future_weeks:
+        iso_week = week.isocalendar().week
+        iso_year = week.isocalendar().year
+        
+        # Get the average trip cost for this ISO week
+        avg_cost = seasonal_pattern[seasonal_pattern['iso_week'] == iso_week]['avg_trip_cost'].iloc[0] if not seasonal_pattern[seasonal_pattern['iso_week'] == iso_week].empty else seasonal_pattern['avg_trip_cost'].mean()
+        
+        forecast_data.append({
+            'purchase_week': week,
+            'avg_trip_cost': avg_cost,
+            'iso_week': iso_week,
+            'iso_year': iso_year,
+            'is_forecast': True
+        })
+    
+    return pd.DataFrame(forecast_data)
+
+
 def analyze_traveling_patterns_by_cohort(historical_df, selected_segment=None, folder_path=None):
     """
     Analyze traveling patterns by purchase week cohort using historical data
@@ -518,33 +569,72 @@ if folder_path and folder_path.exists():
             
             # Historical Trip Cost Analysis - First Plot
             if not trip_cost_analysis.empty:
-                st.subheader("💰 Historical Trip Cost Analysis")
+                st.subheader("💰 Historical Trip Cost Analysis + Forecast")
                 
-                # Create the plot
-                fig = px.line(
-                    trip_cost_analysis,
-                    x='iso_week',
-                    y='avg_trip_cost',
-                    color='iso_year',
-                    color_discrete_sequence=px.colors.qualitative.Safe,
-                    labels={'iso_week': 'ISO Week', 'avg_trip_cost': 'Average Trip Cost', 'iso_year': 'ISO Year'},
-                )
+                # Generate trip cost forecast
+                trip_cost_forecast = generate_trip_cost_forecast(trip_cost_analysis, weeks_ahead=104)
                 
-                # Configure x-axis ticks for ISO weeks
-                tickvals = list(range(1, 53, 4))  # W1, W5, W9, W13, etc.
-                ticktext = [f"W{w}" for w in tickvals]
-                fig.update_xaxes(tickmode="array", tickvals=tickvals, ticktext=ticktext)
-                
-                fig.update_layout(
-                    title="Historical Average Trip Cost by Purchase Week",
-                    legend_title_text="ISO Year",
-                    hovermode="x unified"
-                )
-                
-                st.plotly_chart(fig, use_container_width=True)
-                
-                # Data table
-                st.dataframe(trip_cost_analysis, use_container_width=True)
+                # Combine historical and forecast data
+                if not trip_cost_forecast.empty:
+                    # Add forecast flag
+                    trip_cost_analysis['is_forecast'] = False
+                    trip_cost_forecast['is_forecast'] = True
+                    
+                    # Combine data
+                    combined_data = pd.concat([trip_cost_analysis, trip_cost_forecast], ignore_index=True)
+                    
+                    # Create the plot
+                    fig = px.line(
+                        combined_data,
+                        x='iso_week',
+                        y='avg_trip_cost',
+                        color='iso_year',
+                        line_dash='is_forecast',
+                        color_discrete_sequence=px.colors.qualitative.Safe,
+                        labels={'iso_week': 'ISO Week', 'avg_trip_cost': 'Average Trip Cost', 'iso_year': 'ISO Year'},
+                    )
+                    
+                    # Configure x-axis ticks for ISO weeks
+                    tickvals = list(range(1, 53, 4))  # W1, W5, W9, W13, etc.
+                    ticktext = [f"W{w}" for w in tickvals]
+                    fig.update_xaxes(tickmode="array", tickvals=tickvals, ticktext=ticktext)
+                    
+                    fig.update_layout(
+                        title="Historical Average Trip Cost by Purchase Week + 104-Week Forecast",
+                        legend_title_text="ISO Year",
+                        hovermode="x unified"
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Data table
+                    st.dataframe(combined_data, use_container_width=True)
+                else:
+                    # Fallback to historical only if forecast fails
+                    fig = px.line(
+                        trip_cost_analysis,
+                        x='iso_week',
+                        y='avg_trip_cost',
+                        color='iso_year',
+                        color_discrete_sequence=px.colors.qualitative.Safe,
+                        labels={'iso_week': 'ISO Week', 'avg_trip_cost': 'Average Trip Cost', 'iso_year': 'ISO Year'},
+                    )
+                    
+                    # Configure x-axis ticks for ISO weeks
+                    tickvals = list(range(1, 53, 4))  # W1, W5, W9, W13, etc.
+                    ticktext = [f"W{w}" for w in tickvals]
+                    fig.update_xaxes(tickmode="array", tickvals=tickvals, ticktext=ticktext)
+                    
+                    fig.update_layout(
+                        title="Historical Average Trip Cost by Purchase Week",
+                        legend_title_text="ISO Year",
+                        hovermode="x unified"
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Data table
+                    st.dataframe(trip_cost_analysis, use_container_width=True)
             else:
                 st.warning("No trip cost data available for analysis")
             
