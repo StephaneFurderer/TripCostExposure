@@ -82,7 +82,7 @@ def load_external_forecast(folder_path):
     df = pd.read_csv(forecast_file)
     return df
 
-def convert_monthly_to_weekly_forecast(monthly_forecast, historical_data, weeks_ahead=26, selected_segment=None):
+def convert_monthly_to_weekly_forecast(monthly_forecast, historical_data, weeks_ahead=104, selected_segment=None):
     """Convert monthly forecast to weekly using historical distribution"""
     if monthly_forecast.empty or historical_data.empty:
         return pd.DataFrame()
@@ -92,8 +92,13 @@ def convert_monthly_to_weekly_forecast(monthly_forecast, historical_data, weeks_
     
     forecast_data = []
     model_point_id = 1
+    weeks_generated = 0
     
     for _, row in monthly_forecast.iterrows():
+        # Stop if we've reached the weeks_ahead limit
+        if weeks_generated >= weeks_ahead:
+            break
+            
         month_str = str(row['month'])
         year = int(month_str[:4])
         month = int(month_str[4:])
@@ -133,6 +138,10 @@ def convert_monthly_to_weekly_forecast(monthly_forecast, historical_data, weeks_
             remaining_volume = policy_count % len(all_weeks_in_month)
             
             for i, week in enumerate(future_weeks_in_month):
+                # Stop if we've reached the weeks_ahead limit
+                if weeks_generated >= weeks_ahead:
+                    break
+                    
                 week_position = all_weeks_in_month.index(week)
                 volume = weekly_volume + (1 if week_position < remaining_volume else 0)
                 
@@ -146,8 +155,8 @@ def convert_monthly_to_weekly_forecast(monthly_forecast, historical_data, weeks_
                         'avg_trip_cost': 0,  # Placeholder
                         'total_trip_cost': 0  # Placeholder
                     })
-            
-            model_point_id += 1
+                    model_point_id += 1  # Increment for each week
+                    weeks_generated += 1  # Track weeks generated
     
     return pd.DataFrame(forecast_data)
 
@@ -274,10 +283,13 @@ def create_traveling_forecast_by_cohort(purchase_forecast, traveling_patterns, s
         purchase_week = purchase_row['week_purchased']
         policy_volume = purchase_row['policy_volume']
         
-        # Find matching historical pattern (same week of year)
-        purchase_period = purchase_week.to_period('W-MON')
+        # Find matching historical pattern (same week from previous year)
+        forecast_week = purchase_week.isocalendar().week
+        forecast_year = purchase_week.isocalendar().year
+        
         matching_patterns = traveling_patterns[
-            traveling_patterns['purchase_week'].dt.to_period('W-MON') == purchase_period
+            (traveling_patterns['purchase_week'].dt.isocalendar().week == forecast_week) &
+            (traveling_patterns['purchase_week'].dt.isocalendar().year == forecast_year - 1)
         ]
         
         if matching_patterns.empty:
@@ -286,8 +298,10 @@ def create_traveling_forecast_by_cohort(purchase_forecast, traveling_patterns, s
                 'proportion': 'mean'
             }).reset_index()
         else:
-            # Use the first matching pattern
-            avg_patterns = matching_patterns[['weeks_after_purchase', 'proportion']].copy()
+            # Average across all years for the same week of year
+            avg_patterns = matching_patterns.groupby('weeks_after_purchase').agg({
+                'proportion': 'mean'
+            }).reset_index()
         
         # Apply pattern to forecasted policy volume
         for _, pattern in avg_patterns.iterrows():
@@ -300,6 +314,7 @@ def create_traveling_forecast_by_cohort(purchase_forecast, traveling_patterns, s
                 
                 if traveling_volume > 0:
                     traveling_forecast.append({
+                        'model_point_id': purchase_row['model_point_id'],
                         'purchase_week': purchase_week,
                         'target_week': target_week,
                         'weeks_after_purchase': weeks_after,
@@ -310,6 +325,7 @@ def create_traveling_forecast_by_cohort(purchase_forecast, traveling_patterns, s
                     })
     
     return pd.DataFrame(traveling_forecast)
+
 
 def simple_forecast(historical_data, weeks_ahead=26, folder_path=None, selected_segment=None):
     """Generate forecast using external CSV data"""
@@ -414,15 +430,33 @@ if folder_path and folder_path.exists():
             st.subheader("📈 Purchase Forecast")
             st.dataframe(forecast_df, use_container_width=True)
             
+            # Show cohort patterns analysis
+            if not traveling_patterns.empty:
+                st.subheader("📊 Cohort Patterns from historical data used for forecasting")
+                st.dataframe(traveling_patterns, use_container_width=True)
+            
+            # Show detailed model points with matching patterns
+            if not traveling_forecast_df.empty:
+                st.subheader("📋 Model Points with Matching Patterns")
+                
+                # Display the traveling forecast with model point details
+                st.dataframe(traveling_forecast_df, use_container_width=True)
+                
+                # Summary by model point
+                st.subheader("📊 Summary by Model Point")
+                summary_df = traveling_forecast_df.groupby('model_point_id').agg({
+                    'traveling_policies': 'sum',
+                    'proportion': 'mean'
+                }).reset_index()
+                summary_df.columns = ['Model Point #', 'Total Traveling Policies', 'Avg Proportion']
+                st.dataframe(summary_df, use_container_width=True)
+                
             # Traveling policies analysis (cohort-based)
             if not traveling_by_week_df.empty:
                 st.subheader("✈️ Traveling Policies by Week")
                 st.dataframe(traveling_by_week_df, use_container_width=True)
             
-            # Show cohort patterns analysis
-            if not traveling_patterns.empty:
-                st.subheader("📊 Cohort Patterns")
-                st.dataframe(traveling_patterns, use_container_width=True)
+            
             
             # Download forecast data
             st.markdown("---")
