@@ -6,6 +6,31 @@ import plotly.express as px
 from datetime import datetime, timedelta
 from pathlib import Path
 import json
+# Import filter function from historical page
+def filter_aggregate_data(data, selected_countries, selected_regions):
+    """Filter aggregate data based on country and region selections"""
+    if data is None or data.empty:
+        return data
+    
+    # Apply country filter
+    country_mask = pd.Series(False, index=data.index)
+    if "US" in selected_countries:
+        country_mask |= (data['country_class'] == 'US')
+    if "ROW" in selected_countries:
+        country_mask |= (data['country_class'] == 'ROW')
+    if "null" in selected_countries:
+        country_mask |= (data['country_class'] == 'null')
+    
+    # Apply region filter
+    region_mask = pd.Series(False, index=data.index)
+    for region in selected_regions:
+        region_mask |= (data['region_class'] == region)
+    
+    # Combine filters
+    combined_mask = country_mask & region_mask
+    filtered_data = data[combined_mask].copy()
+    
+    return filtered_data
 
 
 CONFIG = {"start_forecast_week": pd.Timestamp("2025-09-08")}
@@ -810,12 +835,69 @@ if folder_path and folder_path.exists():
                 
 
 
+                # Load historical precomputed data (same as historical page)
+                historical_agg_file = folder_path / "agg_travel_week_by_segment.parquet"
+                if historical_agg_file.exists():
+                    historical_precomputed = pd.read_parquet(historical_agg_file)
+                    
+                    # Aggregate segment data (same logic as historical page)
+                    if "segment" in historical_precomputed.columns:
+                        group_cols = ["year", "x", "country_class", "region_class"]
+                        agg_dict = {}
+                        for col in ["volume", "maxTripCostExposure", "tripCostPerNightExposure", "avgTripCostPerNight"]:
+                            if col in historical_precomputed.columns:
+                                if col == "avgTripCostPerNight":
+                                    agg_dict[col] = "mean"
+                                else:
+                                    agg_dict[col] = "sum"
+                        
+                        historical_precomputed = historical_precomputed.groupby(group_cols, as_index=False).agg(agg_dict)
+                    
+                    # Apply same filters as historical page
+                    historical_filtered = filter_aggregate_data(historical_precomputed, selected_countries, selected_regions)
+                    
+                    # Create historical plot data
+                    historical_plot_data = historical_filtered.groupby(['year', 'x'], as_index=False).agg({
+                        'maxTripCostExposure': 'sum'
+                    })
+                    historical_plot_data = historical_plot_data.sort_values(['year', 'x'])
+                    historical_plot_data['x'] = historical_plot_data['x']  # x is already ISO week
+                    historical_plot_data['iso_year'] = historical_plot_data['year']
+                    historical_plot_data['max_trip_cost_exposure'] = historical_plot_data['maxTripCostExposure']
+                    historical_plot_data['is_forecast'] = False
+                else:
+                    st.warning("⚠️ Historical precomputed data not found, using weekly_purchases as fallback")
+                    # Fallback to weekly_purchases
+                    historical_plot_data = weekly_purchases.copy()
+                    historical_plot_data = historical_plot_data.sort_values('week_start')
+                    historical_plot_data['x'] = historical_plot_data['week_start'].dt.isocalendar().week
+                    historical_plot_data['iso_year'] = historical_plot_data['week_start'].dt.isocalendar().year
+                    historical_plot_data['max_trip_cost_exposure'] = historical_plot_data['total_trip_cost']
+                    historical_plot_data['is_forecast'] = False
+                
+                # Forecast data
+                forecast_plot_data = traveling_by_week_df.copy()
+                forecast_plot_data = forecast_plot_data.sort_values('week')
+                forecast_plot_data['x'] = forecast_plot_data['week'].dt.isocalendar().week
+                forecast_plot_data['iso_year'] = forecast_plot_data['week'].dt.isocalendar().year
+                forecast_plot_data['is_forecast'] = True
+                
+                # Combine historical and forecast data
+                combined_plot_data = pd.concat([
+                    historical_plot_data[['x', 'iso_year', 'max_trip_cost_exposure', 'is_forecast']],
+                    forecast_plot_data[['x', 'iso_year', 'max_trip_cost_exposure', 'is_forecast']]
+                ], ignore_index=True)
+                
+                # Sort by ISO week for proper ordering
+                combined_plot_data = combined_plot_data.sort_values(['x', 'iso_year'])
+
                 # Create the plot
                 fig = px.line(
-                    plot_data,
+                    combined_plot_data,
                     x="x",
                     y="max_trip_cost_exposure",
                     color="iso_year",
+                    line_dash="is_forecast",
                     color_discrete_sequence=px.colors.qualitative.Safe,
                     labels={"x": "ISO Week", "max_trip_cost_exposure": "Max Trip Cost Exposure", "iso_year": "ISO Year"},
                 )
