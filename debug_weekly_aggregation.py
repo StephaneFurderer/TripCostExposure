@@ -91,7 +91,7 @@ def debug_aggregate_traveling_unique_by_period(
             if len(traveling_policies) > 0:
                 # Calculate normalized x-axis value (using ISO week number)
                 x_norm = current_week.isocalendar()[1]  # ISO week number
-                year = current_week.year
+                year = current_week.isocalendar()[0]  # ISO year (not calendar year!)
                 
                 # Calculate nights in week (same logic as week search)
                 night_range_start = traveling_policies["dateDepart"]
