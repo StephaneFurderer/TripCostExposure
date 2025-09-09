@@ -169,8 +169,6 @@ def convert_monthly_to_weekly_forecast(monthly_forecast, historical_data, start_
                         'iso_week': week.isocalendar().week,
                         'iso_year': week.isocalendar().year,
                         'year': week.year,
-                        'avg_trip_cost': 0,  # Placeholder
-                        'total_trip_cost': 0  # Placeholder
                     })
                     model_point_id += 1  # Increment for each week
                     weeks_generated += 1  # Track weeks generated
