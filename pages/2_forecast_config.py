@@ -273,7 +273,11 @@ def generate_trip_cost_forecast(historical_trip_costs, start_forecast_week, week
     last_iso_year = last_trip_cost_date.isocalendar().year
     
     # Find the next Monday after the last observed date
-    next_monday = last_trip_cost_date + pd.Timedelta(days=(7 - last_trip_cost_date.weekday()))
+    # If last date is already a Monday, we want the following Monday
+    if last_trip_cost_date.weekday() == 0:  # Monday
+        next_monday = last_trip_cost_date + pd.Timedelta(weeks=1)
+    else:
+        next_monday = last_trip_cost_date + pd.Timedelta(days=(7 - last_trip_cost_date.weekday()))
     
     # Generate future weeks from the next Monday
     future_weeks = pd.date_range(
