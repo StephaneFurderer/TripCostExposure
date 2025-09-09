@@ -837,14 +837,27 @@ def aggregate_traveling_unique_by_period(
             week_count += 1
             week_end = current_week + pd.to_timedelta(6, unit="D")
             
-            # Find policies traveling during this week
-            traveling_mask = (tmp["dateDepart"] <= week_end) & (tmp["dateReturn"] >= current_week)
+            # Find policies traveling during this week (same logic as week search)
+            traveling_mask = (tmp["dateDepart"] <= week_end) & (tmp["dateReturn"] > current_week)
             traveling_policies = tmp[traveling_mask]
             
             if len(traveling_policies) > 0:
                 # Calculate normalized x-axis value
                 x_norm = pd.Timestamp(2000, 1, 3) + pd.to_timedelta((current_week.isocalendar().week - 1) * 7, unit="D")
                 year = current_week.year
+                
+                # Calculate per-night cost (same as week search)
+                traveling_policies = traveling_policies.copy()
+                traveling_policies["perNight"] = (traveling_policies["tripCost"] / traveling_policies["nightsCount"].replace(0, pd.NA)).fillna(0.0)
+                
+                # Calculate nights in week (same logic as week search)
+                night_range_start = traveling_policies["dateDepart"]
+                night_range_end = traveling_policies["dateReturn"] - pd.to_timedelta(1, unit="D")
+                overlap_start = night_range_start.where(night_range_start > current_week, current_week)
+                overlap_end = night_range_end.where(night_range_end < week_end, week_end)
+                delta = (overlap_end - overlap_start).dt.days + 1
+                traveling_policies["nightsInWeek"] = delta.clip(lower=0).fillna(0).astype(int)
+                traveling_policies["remainingTripCost"] = (traveling_policies["nightsInWeek"] * traveling_policies["perNight"]).round(2)
                 
                 # Always group by country_class and region_class, plus any extra_cols
                 groupby_cols = ["country_class", "region_class"] + extra_cols
@@ -854,19 +867,11 @@ def aggregate_traveling_unique_by_period(
                     if not isinstance(group_vals, tuple):
                         group_vals = (group_vals,)
                     
-                    # Calculate nights in this week for each policy
-                    nights_in_week = []
-                    for _, policy in group_df.iterrows():
-                        start_in_week = max(policy["dateDepart"], current_week)
-                        end_in_week = min(policy["dateReturn"], week_end)
-                        nights = (end_in_week - start_in_week).days + 1
-                        nights_in_week.append(nights)
-                    
-                    # Aggregate metrics for this group
+                    # Aggregate metrics for this group (using week search logic)
                     volume = len(group_df)
                     maxTripCostExposure = group_df["tripCost"].sum()
-                    tripCostPerNightExposure = (group_df["tripCost"] / group_df["nightsCount"] * nights_in_week).sum()
-                    avgTripCostPerNight = (group_df["tripCost"] / group_df["nightsCount"]).mean()
+                    tripCostPerNightExposure = group_df["remainingTripCost"].sum()  # Use calculated remainingTripCost
+                    avgTripCostPerNight = group_df["perNight"].mean()  # Use calculated perNight
                     
                     # Extract country_class and region_class from group_vals
                     country_class = group_vals[0] if len(group_vals) > 0 else "null"
@@ -897,14 +902,27 @@ def aggregate_traveling_unique_by_period(
                 next_month = current_month.replace(month=current_month.month + 1, day=1)
             month_end = next_month - pd.to_timedelta(1, unit="D")
             
-            # Find policies traveling during this month
-            traveling_mask = (tmp["dateDepart"] <= month_end) & (tmp["dateReturn"] >= current_month)
+            # Find policies traveling during this month (same logic as week search)
+            traveling_mask = (tmp["dateDepart"] <= month_end) & (tmp["dateReturn"] > current_month)
             traveling_policies = tmp[traveling_mask]
             
             if len(traveling_policies) > 0:
                 # Calculate normalized x-axis value
                 x_norm = pd.Timestamp(year=2000, month=current_month.month, day=1)
                 year = current_month.year
+                
+                # Calculate per-night cost (same as week search)
+                traveling_policies = traveling_policies.copy()
+                traveling_policies["perNight"] = (traveling_policies["tripCost"] / traveling_policies["nightsCount"].replace(0, pd.NA)).fillna(0.0)
+                
+                # Calculate nights in month (same logic as week search)
+                night_range_start = traveling_policies["dateDepart"]
+                night_range_end = traveling_policies["dateReturn"] - pd.to_timedelta(1, unit="D")
+                overlap_start = night_range_start.where(night_range_start > current_month, current_month)
+                overlap_end = night_range_end.where(night_range_end < month_end, month_end)
+                delta = (overlap_end - overlap_start).dt.days + 1
+                traveling_policies["nightsInMonth"] = delta.clip(lower=0).fillna(0).astype(int)
+                traveling_policies["remainingTripCost"] = (traveling_policies["nightsInMonth"] * traveling_policies["perNight"]).round(2)
                 
                 # Always group by country_class and region_class, plus any extra_cols
                 groupby_cols = ["country_class", "region_class"] + extra_cols
@@ -914,19 +932,11 @@ def aggregate_traveling_unique_by_period(
                     if not isinstance(group_vals, tuple):
                         group_vals = (group_vals,)
                     
-                    # Calculate nights in this month for each policy
-                    nights_in_month = []
-                    for _, policy in group_df.iterrows():
-                        start_in_month = max(policy["dateDepart"], current_month)
-                        end_in_month = min(policy["dateReturn"], month_end)
-                        nights = (end_in_month - start_in_month).days + 1
-                        nights_in_month.append(nights)
-                    
-                    # Aggregate metrics for this group
+                    # Aggregate metrics for this group (using week search logic)
                     volume = len(group_df)
                     maxTripCostExposure = group_df["tripCost"].sum()
-                    tripCostPerNightExposure = (group_df["tripCost"] / group_df["nightsCount"] * nights_in_month).sum()
-                    avgTripCostPerNight = (group_df["tripCost"] / group_df["nightsCount"]).mean()
+                    tripCostPerNightExposure = group_df["remainingTripCost"].sum()  # Use calculated remainingTripCost
+                    avgTripCostPerNight = group_df["perNight"].mean()  # Use calculated perNight
                     
                     # Extract country_class and region_class from group_vals
                     country_class = group_vals[0] if len(group_vals) > 0 else "null"
